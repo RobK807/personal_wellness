@@ -119,8 +119,8 @@
     <thead>
       <tr>
         <th>Date</th><th>Session</th><th>Set by</th><th class="num">Reps</th>
-        <th class="num">Each</th><th class="num">Average split</th>
-        <th class="num">Average pace</th><th class="num">Reps covered</th>
+        <th class="num">Each</th><th class="num">Pace each</th>
+        <th class="num">Reps totalled</th>
         <th class="num">Whole run</th><th></th>
       </tr>
     </thead>
@@ -131,13 +131,13 @@
         <td>{{ row | intervals }}</td>
         <td class="small muted">{{ row.interval_type }}</td>
         <td class="num">{{ row.interval_count or '—' }}</td>
-        <td class="num">{{ row.interval_distance_m | intervaldist
-                           if row.interval_distance_m else '—' }}</td>
-        <td class="num">{{ row.interval_split_s | duration
-                           if row.interval_split_s else '—' }}</td>
+        {# One column: only one of the two length boxes applies to a session. #}
+        <td class="num">{{ row | intervallength or '—' }}</td>
         <td class="num">{{ row.interval_pace_s | pace if row.interval_pace_s else '—' }}</td>
-        <td class="num">{{ row.interval_total_km | km(1) ~ ' km'
-                           if row.interval_total_km else '—' }}</td>
+        <td class="num">
+          {%- if row.interval_total_km %}{{ row.interval_total_km | km(1) }} km
+          {%- elif row.interval_total_s %}{{ row.interval_total_s | duration }}
+          {%- else %}—{% endif %}</td>
         <td class="num">{{ row.distance_km | km(1) }} km at {{ row.pace_s | pace }}</td>
         <td><a class="button small" href="{{ url_for('runs.detail', run_id=row.id) }}">Open</a></td>
       </tr>
@@ -147,14 +147,19 @@
 </div>
 <p class="caption">
   {{ session_totals.sessions }} session{{ '' if session_totals.sessions == 1 else 's' }}
-  {%- if session_totals.reps %}, {{ session_totals.reps }} reps covering
-  {{ session_totals.rep_km | km(1) }} km{% endif %}
+  {%- if session_totals.reps %}, {{ session_totals.reps }} reps{% endif %}
+  {%- if session_totals.rep_km %} covering {{ session_totals.rep_km | km(1) }} km{% endif %}
+  {%- if session_totals.rep_seconds %}
+  {{ 'and' if session_totals.rep_km else 'totalling' }}
+  {{ session_totals.rep_seconds | duration }}{% endif %}
   {%- if session_totals.best_pace_s %}, quickest at
   {{ session_totals.best_pace_s | pace(true) }}{% endif %}.
-  <em>Average pace</em> is the split over the interval distance — worked out,
-  not stored, so it cannot disagree with the two columns beside it. <em>Whole
-  run</em> is there for contrast: the gap between the two is the warm-up,
-  the recoveries and the warm-down.
+  <em>Each</em> is one rep in the unit its own session was set in — a distance
+  for <em>8 x 1k</em>, a time for <em>10 x 0:10</em> — and <em>Pace each</em> is
+  the pace held across them, which is a different figure from the time a rep
+  took unless the reps were kilometres. <em>Whole run</em> is there for
+  contrast: the gap between the two is the warm-up, the recoveries and the
+  warm-down.
 </p>
 {% endif %}
 {% if sessions_to_add %}

@@ -74,11 +74,12 @@
     <summary>Interval session</summary>
     <div>
       <p class="small muted">For a session run as reps. Leave it blank for
-        anything else. <strong>Type</strong> says which of the next two was the
-        target: <em>8 x 1k @ 3:50</em> sets the kilometre and the 3:50 is what
-        happened, <em>6 x 3min @ 783m</em> sets the three minutes and the
-        distance is what happened. Both are kept either way, so the average
-        split and the average pace are both worked out from them.</p>
+        anything else. <strong>Type</strong> says how the session was set, and
+        so which of the two length boxes to fill in: <em>8 x 1k @ 3:50/km</em>
+        is set by distance and has no time per rep, <em>10 x 0:10 @ 3:00/km</em>
+        is set by time and covers no set distance. The pace is filled in either
+        way, and every box is typed — nothing here is worked out from anything
+        else.</p>
       <div class="row two">
         <div class="field">
           <label for="interval_type">Type</label>
@@ -100,29 +101,53 @@
                                  editing.interval_count if editing and editing.interval_count else '') }}">
         </div>
       </div>
-      <div class="row two">
+      <div class="row three">
         <div class="field">
-          <label for="interval_distance_m">Distance per interval</label>
+          <label class="two-part" for="interval_distance_m">
+            <span>Distance per interval</span>
+            <span class="shape">set by distance</span>
+          </label>
           <input type="text" id="interval_distance_m" name="interval_distance_m"
                  placeholder="1k, 400m or 1.6km"
+                 aria-describedby="interval_distance_help"
                  value="{{ value('interval_distance_m',
                                  editing.interval_distance_m | intervaldist
                                  if editing and editing.interval_distance_m else '') }}">
+          <p class="small muted field-help" id="interval_distance_help">
+            {{ interval_field_help.interval_distance_m }}</p>
         </div>
         <div class="field">
-          <label for="interval_split_s">Average split per interval</label>
-          <input type="text" id="interval_split_s" name="interval_split_s"
+          <label class="two-part" for="interval_time_s">
+            <span>Time per interval</span>
+            <span class="shape">set by time</span>
+          </label>
+          <input type="text" id="interval_time_s" name="interval_time_s"
+                 placeholder="3:00"
+                 aria-describedby="interval_time_help"
+                 value="{{ value('interval_time_s',
+                                 editing.interval_time_s | duration
+                                 if editing and editing.interval_time_s else '') }}">
+          <p class="small muted field-help" id="interval_time_help">
+            {{ interval_field_help.interval_time_s }}</p>
+        </div>
+        <div class="field">
+          <label class="two-part" for="interval_pace_s">
+            <span>Pace per interval</span>
+            <span class="shape">either way</span>
+          </label>
+          <input type="text" id="interval_pace_s" name="interval_pace_s"
                  placeholder="3:50"
-                 value="{{ value('interval_split_s',
-                                 editing.interval_split_s | duration
-                                 if editing and editing.interval_split_s else '') }}">
+                 aria-describedby="interval_pace_help"
+                 value="{{ value('interval_pace_s',
+                                 editing.interval_pace_s | duration
+                                 if editing and editing.interval_pace_s else '') }}">
+          <p class="small muted field-help" id="interval_pace_help">
+            {{ interval_field_help.interval_pace_s }}</p>
         </div>
       </div>
-      {% if editing and editing.interval_pace_s %}
-      <p class="small muted">Currently {{ editing.interval_split_s | duration }}
-        per interval, which over
-        {{ editing.interval_distance_m | intervaldist }} is
-        <strong>{{ editing.interval_pace_s | pace(true) }}</strong>.</p>
+      {% if editing and editing.interval_type %}
+      <p class="small muted">Currently
+        <strong>{{ editing | intervals }}</strong>.</p>
       {% endif %}
     </div>
   </details>
@@ -190,7 +215,7 @@
   </table>
 </div>
 <p class="caption">The two best-effort columns are there as a prompt: a session
-  of 1k reps will usually have a best 1K close to its average split.</p>
+  of 1k reps will usually have a best 1K close to its time per interval.</p>
 {% endif %}
 
 {% if not editing and recent %}

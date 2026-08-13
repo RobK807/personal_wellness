@@ -132,10 +132,8 @@ def input_page():
             "run_type": request.form.get("run_type", ""),
             "effort_type": request.form.get("effort_type", ""),
             "note": request.form.get("note", ""),
-            "interval_type": request.form.get("interval_type", ""),
-            "interval_count": request.form.get("interval_count", ""),
-            "interval_distance_m": request.form.get("interval_distance_m", ""),
-            "interval_split_s": request.form.get("interval_split_s", ""),
+            **{name: request.form.get(name, "")
+               for name in runs.INTERVAL_FIELDS},
         }
         breakdowns = {label: request.form.get(f"bd_{index}", "")
                       for index, (label, _) in enumerate(config.BREAKDOWNS)}
@@ -168,9 +166,10 @@ def input_page():
         effort_types=config.EFFORT_TYPES,
         interval_types=config.INTERVAL_TYPES,
         interval_type_labels=config.INTERVAL_TYPE_LABELS,
+        interval_field_help=config.INTERVAL_FIELD_HELP,
         outstanding=outstanding,
         # A prompt rather than an answer: a session of 1k reps usually has a
-        # best 1K close to its average split, which is a useful thing to have
+        # best 1K close to its average time, which is a useful thing to have
         # in front of you when filling one in from memory.
         best_400m=_best_at(outstanding, "400m"),
         best_1k=_best_at(outstanding, "1K"),

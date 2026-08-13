@@ -123,6 +123,10 @@ def _register_filters(app: Flask) -> None:
     def _intervals(row) -> str:
         return runs.interval_summary(row)
 
+    @app.template_filter("intervallength")
+    def _interval_length(row) -> str:
+        return runs.interval_length(row) or ""
+
 
 def _register_context(app: Flask) -> None:
     """Everything base.html needs, on every page."""

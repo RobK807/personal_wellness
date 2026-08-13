@@ -82,8 +82,8 @@ def _upsert(conn: sqlite3.Connection, parsed: Mapping, source: str) -> int:
         """
         INSERT INTO runs (day, distance_km, duration_s, run_type, effort_type,
                           note, source, interval_type, interval_count,
-                          interval_distance_m, interval_split_s)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          interval_distance_m, interval_time_s, interval_pace_s)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (day, distance_km, duration_s) DO UPDATE SET
             run_type    = excluded.run_type,
             effort_type = excluded.effort_type,
@@ -92,13 +92,15 @@ def _upsert(conn: sqlite3.Connection, parsed: Mapping, source: str) -> int:
             interval_type       = excluded.interval_type,
             interval_count      = excluded.interval_count,
             interval_distance_m = excluded.interval_distance_m,
-            interval_split_s    = excluded.interval_split_s,
+            interval_time_s     = excluded.interval_time_s,
+            interval_pace_s     = excluded.interval_pace_s,
             updated_at  = datetime('now')
         """,
         (parsed["day"].isoformat(), parsed["distance_km"], parsed["duration_s"],
          parsed["run_type"], parsed["effort_type"], parsed["note"], source,
          parsed["interval_type"], parsed["interval_count"],
-         parsed["interval_distance_m"], parsed["interval_split_s"]),
+         parsed["interval_distance_m"], parsed["interval_time_s"],
+         parsed["interval_pace_s"]),
     )
     return conn.execute(
         "SELECT id FROM runs WHERE day = ? AND distance_km = ? AND duration_s = ?",
@@ -131,14 +133,15 @@ def _update(conn: sqlite3.Connection, run_id: int, parsed: Mapping,
         UPDATE runs SET day = ?, distance_km = ?, duration_s = ?, run_type = ?,
                         effort_type = ?, note = ?, source = ?,
                         interval_type = ?, interval_count = ?,
-                        interval_distance_m = ?, interval_split_s = ?,
-                        updated_at = datetime('now')
+                        interval_distance_m = ?, interval_time_s = ?,
+                        interval_pace_s = ?, updated_at = datetime('now')
         WHERE id = ?
         """,
         (parsed["day"].isoformat(), parsed["distance_km"], parsed["duration_s"],
          parsed["run_type"], parsed["effort_type"], parsed["note"], source,
          parsed["interval_type"], parsed["interval_count"],
-         parsed["interval_distance_m"], parsed["interval_split_s"], run_id),
+         parsed["interval_distance_m"], parsed["interval_time_s"],
+         parsed["interval_pace_s"], run_id),
     ).rowcount
     if not changed:
         raise InvalidRun(f"No run with id {run_id}")

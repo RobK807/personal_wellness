@@ -217,7 +217,7 @@ def parse_run(values: Mapping[str, object], today: dt.date | None = None) -> dic
         "effort_type": parse_choice(values.get("effort_type"),
                                     config.EFFORT_TYPES, "Effort type"),
         "note": (str(values.get("note") or "")).strip() or None,
-        **parse_intervals(values, distance),
+        **parse_intervals(values, distance, duration),
     }
 
 
@@ -225,11 +225,19 @@ def parse_run(values: Mapping[str, object], today: dt.date | None = None) -> dic
 # Interval sessions
 # --------------------------------------------------------------------------- #
 BLANK_INTERVALS = {"interval_type": None, "interval_count": None,
-                   "interval_distance_m": None, "interval_split_s": None}
+                   "interval_distance_m": None, "interval_time_s": None,
+                   "interval_pace_s": None}
 
 
 def _blank(value) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
+
+
+# Ways of writing a time that someone might reach for in the distance box on a
+# session set by time. Caught by name so the message can point at the right box
+# rather than saying '3min' is not a distance and leaving it there.
+_TIME_SHAPED = ("min", "mins", "minute", "minutes", "sec", "secs", "second",
+                "seconds")
 
 
 def parse_interval_distance(raw) -> float:
@@ -239,8 +247,16 @@ def parse_interval_distance(raw) -> float:
     already in the database are called things like '8x1k intervals' - and
     making someone type 1000 when they wrote 1k is the sort of friction that
     stops a field being filled in at all.
+
+    Never a time. A session set by time records its rep length in
+    `interval_time_s` and leaves this blank; see config.INTERVAL_FIELD_HELP.
     """
     text = str(raw).strip().lower().replace(" ", "")
+    if ":" in text or text.endswith(_TIME_SHAPED):
+        raise InvalidRun(
+            f"'{raw}' is a time, not a distance. A session set by time records "
+            f"its reps in 'Time per interval' and leaves this blank; this box "
+            f"takes how far each rep was (try 400m, 1k or 1.6km)")
     multiplier = 1.0
     if text.endswith("km"):
         text, multiplier = text[:-2], 1000.0
@@ -263,37 +279,67 @@ def parse_interval_distance(raw) -> float:
     return round(metres, 1)
 
 
-def parse_intervals(values: Mapping[str, object], run_km: float) -> dict:
-    """The four interval columns, or four Nones if the session was not one.
+INTERVAL_FIELDS = ("interval_type", "interval_count", "interval_distance_m",
+                   "interval_time_s", "interval_pace_s")
 
-    Everything is optional - a run recorded before intervals were tracked has
-    none of it, and a session being filled in from memory may only have some -
-    but a few combinations are refused because they would be misleading rather
-    than merely incomplete:
+# What each length field is called on screen, for messages that need to send
+# someone to the right box.
+_FIELD_LABEL = {"interval_distance_m": "Distance per interval",
+                "interval_time_s": "Time per interval",
+                "interval_pace_s": "Pace per interval"}
 
-      * a count or a length with no type, because the type is what says whether
-        the length is a distance or a duration;
-      * a session whose reps add up to more than the run they sit inside.
+
+def parse_intervals(values: Mapping[str, object], run_km: float,
+                    run_duration_s: int | None = None) -> dict:
+    """The five interval columns, or five Nones if the session was not one.
+
+    Every field is entered and none is worked out from another. That is worth
+    stating because the obvious shortcut - deriving the pace from the rep
+    length - only exists for a session set by distance. Ten-second sprints are
+    0:10 each at something like 3:00/km, and no arithmetic here gets from one
+    to the other, so the pace is asked for and kept.
+
+    Everything is optional, since a session filled in from memory may only have
+    some of it, but these are refused as misleading rather than incomplete:
+
+      * a count or a length with no type, because the type is what says which
+        of the two length boxes applies;
+      * the length that belongs to the other type - a distance per rep on a
+        session set by time, or the reverse;
+      * a session whose reps add up to more than the run they sit inside,
+        either in distance or in time.
     """
     kind = values.get("interval_type")
     count = values.get("interval_count")
-    distance = values.get("interval_distance_m")
-    split = values.get("interval_split_s")
+    entered = {name: values.get(name) for name in
+               ("interval_distance_m", "interval_time_s", "interval_pace_s")}
 
-    if all(_blank(v) for v in (kind, count, distance, split)):
+    if _blank(kind) and _blank(count) and all(map(_blank, entered.values())):
         return dict(BLANK_INTERVALS)
 
     if _blank(kind):
         raise InvalidRun(
             "Choose whether the intervals were set by distance or by time - "
-            "without it there is no telling what the length means")
+            "without it there is no telling which length box applies")
     kind = str(kind).strip().lower()
     if kind not in config.INTERVAL_TYPES:
         raise InvalidRun(f"'{kind}' is not an interval type "
                          f"({' or '.join(config.INTERVAL_TYPES)})")
 
-    parsed = {"interval_type": kind, "interval_count": None,
-              "interval_distance_m": None, "interval_split_s": None}
+    # Exactly one of the two length boxes belongs to this kind of session. The
+    # other is refused rather than dropped, because silently discarding
+    # something that was typed in is how a form loses an afternoon's entry.
+    mine = config.INTERVAL_LENGTH_FIELD[kind]
+    theirs = config.INTERVAL_LENGTH_FIELD[
+        "time" if kind == "distance" else "distance"]
+    if not _blank(entered[theirs]):
+        raise InvalidRun(
+            f"'{_FIELD_LABEL[theirs]}' does not apply to a session set by "
+            f"{kind} - that one records {'how far' if kind == 'time' else 'how long'}"
+            f" each rep was, which a session set by {kind} does not fix. Put "
+            f"the reps in '{_FIELD_LABEL[mine]}' and leave the other blank")
+
+    parsed = dict(BLANK_INTERVALS, interval_type=kind)
 
     if not _blank(count):
         try:
@@ -306,27 +352,42 @@ def parse_intervals(values: Mapping[str, object], run_km: float) -> dict:
                 f"{parsed['interval_count']} intervals looks wrong - expected "
                 f"between {low} and {high}")
 
-    if not _blank(distance):
-        parsed["interval_distance_m"] = parse_interval_distance(distance)
+    if not _blank(entered["interval_distance_m"]):
+        parsed["interval_distance_m"] = parse_interval_distance(
+            entered["interval_distance_m"])
 
-    if not _blank(split):
-        parsed["interval_split_s"] = parse_duration(split, "Interval split")
-        low, high = config.INTERVAL_BOUNDS["interval_split_s"]
-        if not low <= parsed["interval_split_s"] <= high:
-            raise InvalidRun(
-                f"An interval split of {fmt_duration(parsed['interval_split_s'])} "
-                f"looks wrong - expected between {fmt_duration(low)} and "
-                f"{fmt_duration(high)}")
+    for name, label in (("interval_time_s", "Time per interval"),
+                        ("interval_pace_s", "Pace per interval")):
+        if _blank(entered[name]):
+            continue
+        parsed[name] = parse_duration(entered[name], label)
+        low, high = config.INTERVAL_BOUNDS[name]
+        if not low <= parsed[name] <= high:
+            message = (f"{label} of {fmt_duration(parsed[name])} looks wrong - "
+                       f"expected between {fmt_duration(low)} and "
+                       f"{fmt_duration(high)}")
+            if name == "interval_pace_s":
+                message += (" per kilometre. A pace is not how long a rep took "
+                            "- ten-second sprints are 0:10 each, at something "
+                            "like 3:00/km")
+            raise InvalidRun(message)
 
-    # The reps cannot cover more ground, or take more time, than the whole run.
+    # The reps cannot add up to more than the run they sit inside - in ground
+    # covered for a session set by distance, in time on the clock for one set
+    # by time. Same check, whichever unit the session is measured in.
     count, metres, seconds = (parsed["interval_count"],
                               parsed["interval_distance_m"],
-                              parsed["interval_split_s"])
+                              parsed["interval_time_s"])
     if count and metres and count * metres / 1000.0 > run_km * 1.001:
         raise InvalidRun(
             f"{count} x {fmt_interval_distance(metres)} is "
             f"{count * metres / 1000.0:,.2f} km of intervals inside a "
             f"{fmt_distance(run_km)} km run")
+    if count and seconds and run_duration_s and count * seconds > run_duration_s:
+        raise InvalidRun(
+            f"{count} x {fmt_duration(seconds)} is "
+            f"{fmt_duration(count * seconds)} of intervals inside a "
+            f"{fmt_duration(run_duration_s)} run")
     return parsed
 
 
@@ -340,23 +401,33 @@ def fmt_interval_distance(metres) -> str:
     return f"{metres / 1000:g}k"
 
 
-def interval_summary(run: Mapping) -> str:
-    """A session in the shorthand it was named in: '8 x 1k @ 3:50'."""
+def interval_length(run: Mapping) -> str | None:
+    """One rep, written the way its own kind of session measures them.
+
+    '1k' for a session set by distance, '0:10' for one set by time. None when
+    the box that applies has not been filled in yet.
+    """
     kind = run.get("interval_type")
-    if not kind:
+    if kind == "distance" and run.get("interval_distance_m"):
+        return fmt_interval_distance(run["interval_distance_m"])
+    if kind == "time" and run.get("interval_time_s"):
+        return fmt_duration(run["interval_time_s"])
+    return None
+
+
+def interval_summary(run: Mapping) -> str:
+    """A session in the shorthand it was named in: '8 x 1k @ 3:50/km'.
+
+    The reps lead, because that is what the session was; the pace follows the
+    @, because that is how it went. Carrying the /km is not decoration - it is
+    what stops '10 x 0:10 @ 3:00' reading as though the reps took three
+    minutes each.
+    """
+    if not run.get("interval_type"):
         return ""
     count = run.get("interval_count")
-    metres = run.get("interval_distance_m")
-    split = run.get("interval_split_s")
-
-    # The prescribed half of the pair leads, because that is the session; the
-    # measured half follows the @, because that is how it went.
-    if kind == "distance":
-        length = fmt_interval_distance(metres)
-        achieved = fmt_duration(split) if split else None
-    else:
-        length = fmt_duration(split) if split else None
-        achieved = fmt_interval_distance(metres) if metres else None
+    length = interval_length(run)
+    rep_pace = run.get("interval_pace_s")
 
     parts = []
     if count and length:
@@ -365,22 +436,9 @@ def interval_summary(run: Mapping) -> str:
         parts.append(f"{count} intervals")
     elif length:
         parts.append(length)
-    if achieved:
-        parts.append(f"@ {achieved}")
+    if rep_pace:
+        parts.append(f"@ {fmt_pace(rep_pace, True)}")
     return " ".join(parts)
-
-
-def interval_pace(run: Mapping):
-    """Seconds per kilometre across the reps, or None if it cannot be worked out.
-
-    The database computes this too, in v_runs - this is for the places holding
-    a dict that did not come from there, such as the value just parsed out of
-    the input form.
-    """
-    split, metres = run.get("interval_split_s"), run.get("interval_distance_m")
-    if not split or not metres:
-        return None
-    return float(split) / (float(metres) / 1000.0)
 
 
 def parse_breakdowns(entries: Mapping[str, object], distance_km: float,

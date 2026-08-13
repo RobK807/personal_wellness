@@ -33,6 +33,7 @@ from __future__ import annotations
 import collections
 import datetime as dt
 import os
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -319,10 +320,10 @@ def main() -> int:
     with db.transaction(TEMP_DB) as conn:
         conn.execute(
             "UPDATE runs SET interval_type = 'distance', interval_count = 8, "
-            "interval_distance_m = 1000, interval_split_s = 230 WHERE id = ?",
+            "interval_distance_m = 1000, interval_pace_s = 230 WHERE id = ?",
             (target["id"],))
     check("recorded against a run", runs.interval_summary(
-        run_queries.run(target["id"])), "8 x 1k @ 3:50")
+        run_queries.run(target["id"])), "8 x 1k @ 3:50 /km")
 
     rebuilt = strava_import.run_import(db_path=TEMP_DB, rebuild=True)
     check("put back after a full rebuild", rebuilt["interval_sessions_kept"], 1)
@@ -331,9 +332,61 @@ def main() -> int:
     same = [row for row in run_queries.runs_on(target["day"])
             if row["distance_km"] == target["distance_km"]][0]
     check("and still reads the same",
-          runs.interval_summary(same), "8 x 1k @ 3:50")
-    check("with its derived pace",
+          runs.interval_summary(same), "8 x 1k @ 3:50 /km")
+    check("with its entered pace",
           runs.fmt_pace(same["interval_pace_s"]), "3:50")
+
+    # The column this replaced. A database that still has it must come forward
+    # with the pace worked out from what was there, once, and then be left
+    # alone - see core/db.py _convert_interval_splits.
+    print("\nThe old interval_split_s column converts on first start")
+    legacy = Path(tempfile.gettempdir()) / "wellness_legacy_split.db"
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(legacy) + suffix).unlink(missing_ok=True)
+    with sqlite3.connect(legacy) as conn:
+        conn.executescript("""
+            CREATE TABLE runs (
+                id INTEGER PRIMARY KEY, day TEXT, distance_km REAL,
+                duration_s INTEGER, run_type TEXT, effort_type TEXT,
+                note TEXT, source TEXT DEFAULT 'manual',
+                interval_type TEXT, interval_count INTEGER,
+                interval_distance_m REAL, interval_split_s INTEGER,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')));
+            INSERT INTO runs (day, distance_km, duration_s, run_type,
+                              effort_type, interval_type, interval_count,
+                              interval_distance_m, interval_split_s)
+            VALUES ('2026-04-04', 9.76, 2810, 'Intervals', 'VO2 max',
+                    'distance', 5, 1000, 233),
+                   ('2026-04-05', 8.00, 2400, 'Intervals', 'VO2 max',
+                    'distance', 12, 400, 92),
+                   ('2026-04-06', 8.00, 2401, 'Intervals', 'VO2 max',
+                    'time', 6, NULL, 180);
+        """)
+    db.init_db(legacy)
+    with sqlite3.connect(legacy) as conn:
+        conn.row_factory = sqlite3.Row
+        got = {row["day"]: dict(row) for row in conn.execute(
+            "SELECT day, interval_type, interval_time_s, interval_pace_s "
+            "FROM runs ORDER BY day")}
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+    # 1k reps: the split was already the pace. 400m reps: 92s over 0.4 km is a
+    # 3:50/km, which is the figure that column should always have held.
+    check("1k reps keep their number",
+          runs.fmt_pace(got["2026-04-04"]["interval_pace_s"]), "3:53")
+    check("400m reps convert to a pace",
+          runs.fmt_pace(got["2026-04-05"]["interval_pace_s"]), "3:50")
+    check("and lose the time, which does not apply",
+          got["2026-04-05"]["interval_time_s"], None)
+    check("a session set by time keeps its rep length",
+          runs.fmt_duration(got["2026-04-06"]["interval_time_s"]), "3:00")
+    check("the old column is gone", "interval_split_s" in columns, False)
+    # Second start: nothing left to do, and nothing damaged by trying.
+    db.init_db(legacy)
+    with sqlite3.connect(legacy) as conn:
+        again = conn.execute("SELECT interval_pace_s FROM runs "
+                             "WHERE day = '2026-04-05'").fetchone()[0]
+    check("re-running the migration changes nothing", again, 230)
 
     print()
     if failures:

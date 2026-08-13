@@ -275,7 +275,8 @@ def run_import(source: Path | None = None, sheet: str | None = None,
             (row["day"], row["distance_km"], row["duration_s"]): dict(row)
             for row in conn.execute(
                 "SELECT day, distance_km, duration_s, interval_type, "
-                "interval_count, interval_distance_m, interval_split_s "
+                "interval_count, interval_distance_m, interval_time_s, "
+                "interval_pace_s "
                 "FROM runs WHERE interval_type IS NOT NULL")
         }
 
@@ -300,13 +301,14 @@ def run_import(source: Path | None = None, sheet: str | None = None,
             changed = conn.execute(
                 """
                 UPDATE runs SET interval_type = ?, interval_count = ?,
-                                interval_distance_m = ?, interval_split_s = ?
+                                interval_distance_m = ?, interval_time_s = ?,
+                                interval_pace_s = ?
                 WHERE day = ? AND distance_km = ? AND duration_s = ?
                   AND interval_type IS NULL
                 """,
                 (saved["interval_type"], saved["interval_count"],
-                 saved["interval_distance_m"], saved["interval_split_s"],
-                 *identity),
+                 saved["interval_distance_m"], saved["interval_time_s"],
+                 saved["interval_pace_s"], *identity),
             ).rowcount
             restored += changed
             # The run's date, distance or time changed in the sheet, so there is

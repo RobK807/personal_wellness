@@ -225,15 +225,14 @@ the future. Entering a run that already exists corrects it rather than
 duplicating it.</p>
 <h3 id="interval-sessions">Interval sessions</h3>
 <p>A run flagged <strong>Intervals</strong> can carry the shape of the session as well as the
-run: how it was set, how many reps, how long each was and the average split.
-Four nullable columns on <code>runs</code>, so every run recorded before this existed
+run. Five nullable columns on <code>runs</code>, so every run recorded before this existed
 simply reads blank.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
 <th>column</th>
-<th><code>8 x 1k @ 3:50</code></th>
-<th><code>6 x 3min @ 783m</code></th>
+<th><code>8 x 1k @ 3:50/km</code></th>
+<th><code>10 x 0:10 @ 3:00/km</code></th>
 </tr>
 </thead>
 <tbody>
@@ -245,35 +244,60 @@ simply reads blank.</p>
 <tr>
 <td><code>interval_count</code></td>
 <td>8</td>
-<td>6</td>
+<td>10</td>
 </tr>
 <tr>
 <td><code>interval_distance_m</code></td>
-<td>1000 <em>(the target)</em></td>
-<td>783 <em>(what happened)</em></td>
+<td>1000</td>
+<td>— <em>(no set distance)</em></td>
 </tr>
 <tr>
-<td><code>interval_split_s</code></td>
-<td>3:50 <em>(what happened)</em></td>
-<td>3:00 <em>(the target)</em></td>
+<td><code>interval_time_s</code></td>
+<td>— <em>(no set time)</em></td>
+<td>0:10</td>
+</tr>
+<tr>
+<td><code>interval_pace_s</code></td>
+<td>3:50</td>
+<td>3:00</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>interval_type</code> is what says which of the middle two was prescribed and which
-was the outcome. Both are kept either way, which is what makes the <strong>average
-split</strong> and the <strong>average pace</strong> both available for both kinds of session — the
-pace being <code>split ÷ distance</code>, derived in <code>v_runs</code> rather than stored, so it
-cannot drift from the two columns it comes from. For 1k reps the two are the
-same number; for 400m reps they are 1:32 and 3:50, which is the case the shape
-had to get right.</p>
+<p><code>interval_type</code> says how the session was set, and so <strong>which of the two length
+boxes applies</strong>. A session set by distance fixes how far each rep is and lets
+the clock fall where it may; one set by time does the reverse. The box that
+does not apply is refused rather than quietly dropped, because silently
+discarding something typed into a form is how an afternoon's entry disappears.</p>
+<p><strong>Every field is entered; none is worked out from another.</strong> That is a
+deliberate exception to the rule the rest of the tracker follows, and
+ten-second sprints are the case that forces it: the reps are 0:10 each at a
+pace of something like 3:00/km, and with no distance recorded there is nothing
+to divide. <code>interval_pace_s</code> is the only stored pace in the database. It is
+safe to store precisely because nothing else holds the same fact — there is no
+second copy for it to drift from, which is the actual reason pace is derived
+everywhere else.</p>
 <p>Distances are typed as <code>400m</code>, <code>1k</code> or <code>1.6km</code>, because that is how the
-sessions are named. The form refuses a length with no type (there would be no
-telling whether it was metres or minutes) and a session whose reps add up to
-more than the run they sit inside.</p>
+sessions are named; times and paces as <code>mm:ss</code>. The form refuses:</p>
+<ul>
+<li>a length with no type — the type is what says which box applies;</li>
+<li>a distance per rep on a session set by time, or a time per rep on one set by
+  distance;</li>
+<li>a session whose reps add up to more than the run they sit inside, in
+  kilometres or on the clock;</li>
+<li>a time in the distance box — <code>3:00</code> and <code>3min</code> are caught by shape, and the
+  message points at the box that wanted them;</li>
+<li>a pace outside 1:30–20:00 per kilometre, which is what catches the rep time
+  typed into the pace box. <code>0:10</code> there is ten seconds per kilometre.</li>
+</ul>
 <p>The Log page lists the runs the spreadsheet called intervals that have no
 detail yet, with each one's best 400m and best 1K beside it as a prompt — a
-session of 1k reps usually has a best 1K close to its average split. The list
-empties itself as they are filled in.</p>
+session of 1k reps usually has a best 1K close to its pace per interval. The
+list empties itself as they are filled in.</p>
+<p>An earlier cut of this stored a time per rep and divided out the pace. It only
+worked for sessions set by distance, and <code>core/db.py _convert_interval_splits</code>
+brings a database holding that column forward: the pace it should always have
+had is worked out per row, the rep time is kept only where the session was set
+by time, and the old column is dropped.</p>
 <p>None of this is in the spreadsheet, so <strong><code>--rebuild</code> preserves it</strong>: the
 importer keeps the interval columns against each run's identity and puts them
 back after reloading. A run whose date, distance or time has since changed in

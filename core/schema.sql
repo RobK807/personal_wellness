@@ -184,18 +184,36 @@ CREATE TABLE IF NOT EXISTS runs (
     -- most one of these per run: a separate table would be a one-to-one join
     -- that could only ever go wrong.
     --
-    -- `interval_type` says which of the next two was the target and which is
-    -- what actually happened - 8 x 1k @ 3:50 prescribes the kilometre, 6 x 3min
-    -- @ 783m prescribes the three minutes. Both are kept either way, so the
-    -- average split and the average pace are both available for both kinds.
-    -- The pace itself is derived; see v_runs.
+    -- `interval_type` says how the session was set, and so which of the two
+    -- lengths below applies: 8 x 1k prescribes the kilometre and has no time
+    -- per rep, 6 x 3:00 prescribes the three minutes and has no distance per
+    -- rep. Exactly one of them is filled in, and the other is refused on the
+    -- way in rather than quietly stored against a session it means nothing for.
+    --
+    -- `interval_pace_s` is entered, not derived, and it is the one figure that
+    -- applies to both kinds. This is the only stored pace in the database, and
+    -- the exception is deliberate: for a session set by time there is no
+    -- distance to divide by, so there is nothing to derive it from. Ten-second
+    -- sprints have a time of 0:10 and a pace of something like 3:00/km, and no
+    -- arithmetic available here connects the two. Nothing else stores the same
+    -- fact, so there is no second copy for it to drift from - which is the
+    -- reason pace is derived everywhere else, not a preference for division.
     interval_type       TEXT    CHECK (interval_type IN ('distance', 'time')),
     interval_count      INTEGER CHECK (interval_count > 0),
     interval_distance_m REAL    CHECK (interval_distance_m > 0),
-    interval_split_s    INTEGER CHECK (interval_split_s > 0),
+    interval_time_s     INTEGER CHECK (interval_time_s > 0),
+    interval_pace_s     INTEGER CHECK (interval_pace_s > 0),
 
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+
+    -- Only the length matching the type may be set. A table constraint rather
+    -- than a column one because it reads two columns, which is also why a
+    -- database brought forward with ALTER TABLE ADD COLUMN cannot carry it -
+    -- core/runs.py enforces the same rule on every write, which is where a bad
+    -- value would actually come from.
+    CHECK (interval_type IS NOT 'distance' OR interval_time_s IS NULL),
+    CHECK (interval_type IS NOT 'time'     OR interval_distance_m IS NULL)
 );
 
 -- What makes two rows the same run. The sheet has no activity id in Final_data,
@@ -264,21 +282,21 @@ SELECT
     r.interval_type,
     r.interval_count,
     r.interval_distance_m,
-    r.interval_split_s,
-    -- The average pace held during the reps, in seconds per kilometre. Derived
-    -- from the two columns above rather than stored, so it cannot drift from
-    -- them - the same rule pace_s follows for the run as a whole. Null unless
-    -- both are filled in, which is what makes a part-entered session harmless.
-    CASE WHEN r.interval_split_s IS NOT NULL
-              AND r.interval_distance_m IS NOT NULL
-         THEN r.interval_split_s / (r.interval_distance_m / 1000.0)
-    END                                                      AS interval_pace_s,
-    -- How far the reps covered between them, which is the part of the run that
-    -- was actually the session rather than warm-up, recovery and warm-down.
+    r.interval_time_s,
+    r.interval_pace_s,
+    -- How much of the run was actually the session rather than warm-up,
+    -- recovery and warm-down. Which of the two applies follows the type, for
+    -- the same reason the two lengths do: a session set by time has no
+    -- distance per rep to add up, and one set by distance has no time per rep.
+    -- Multiplying out what was entered, never dividing one entry by another.
     CASE WHEN r.interval_count IS NOT NULL
               AND r.interval_distance_m IS NOT NULL
          THEN r.interval_count * r.interval_distance_m / 1000.0
     END                                                      AS interval_total_km,
+    CASE WHEN r.interval_count IS NOT NULL
+              AND r.interval_time_s IS NOT NULL
+         THEN r.interval_count * r.interval_time_s
+    END                                                      AS interval_total_s,
     (SELECT COUNT(*) FROM run_bests b WHERE b.run_id = r.id) AS breakdowns
 FROM runs r;
 

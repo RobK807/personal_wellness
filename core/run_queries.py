@@ -148,7 +148,7 @@ def interval_totals(**filters) -> dict:
                SUM(interval_count)               AS reps,
                ROUND(SUM(interval_total_km), 2)  AS rep_km,
                MIN(interval_pace_s)              AS best_pace_s,
-               SUM(interval_split_s * interval_count) AS rep_seconds
+               SUM(interval_total_s)             AS rep_seconds
         FROM v_runs
         WHERE interval_type IS NOT NULL{where}
     """, params) or {}

@@ -61,8 +61,10 @@ def _formatted(frame: pd.DataFrame) -> pd.DataFrame:
             ("to add" if row.get("run_type") == "Intervals" else "")
             for row in frame.to_dict("records")
         ]
-        frame["Interval pace"] = frame["interval_pace_s"].map(
+        frame["Pace per interval"] = frame["interval_pace_s"].map(
             lambda value: runs.fmt_pace(value) if value else "")
+        frame["Per interval"] = [runs.interval_length(row) or ""
+                                 for row in frame.to_dict("records")]
     return frame
 
 
@@ -134,9 +136,10 @@ RAW = ["duration_s", "seconds", "avg_seconds", "best_seconds", "worst_seconds",
        "avg_duration_s", "pace_s", "best_pace_s", "avg_pace_s", "ordinal",
        "run_id", "id", "km", "source", "suspect",
        # The interval columns are shown through `Session`, which reads as
-       # "8 x 1k @ 3:50" rather than as four columns of raw numbers.
+       # "8 x 1k @ 3:50/km" rather than as five columns of raw numbers.
        "interval_type", "interval_count", "interval_distance_m",
-       "interval_split_s", "interval_pace_s", "interval_total_km"]
+       "interval_time_s", "interval_pace_s", "interval_total_km",
+       "interval_total_s"]
 
 LABELS = {
     "day": "Date",

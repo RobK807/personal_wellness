@@ -34,30 +34,38 @@
   <h3>{{ run | intervals }}</h3>
   <dl class="facts">
     <dt>Set by</dt>
-    <dd>{{ 'Distance — the length was the target' if run.interval_type == 'distance'
-           else 'Time — the duration was the target' }}</dd>
+    <dd>{{ 'Distance — each rep was a set length' if run.interval_type == 'distance'
+           else 'Time — each rep was a set duration' }}</dd>
     {% if run.interval_count %}<dt>Intervals</dt><dd>{{ run.interval_count }}</dd>{% endif %}
     {% if run.interval_distance_m %}
-    <dt>Distance each</dt><dd>{{ run.interval_distance_m | intervaldist }}</dd>{% endif %}
-    {% if run.interval_split_s %}
-    <dt>Average split</dt><dd>{{ run.interval_split_s | duration }}</dd>{% endif %}
+    <dt>Distance per interval</dt>
+    <dd>{{ run.interval_distance_m | intervaldist }}</dd>{% endif %}
+    {% if run.interval_time_s %}
+    <dt>Time per interval</dt>
+    <dd>{{ run.interval_time_s | duration }}</dd>{% endif %}
     {% if run.interval_pace_s %}
-    <dt>Average pace</dt><dd>{{ run.interval_pace_s | pace(true) }}</dd>{% endif %}
+    <dt>Pace per interval</dt>
+    <dd>{{ run.interval_pace_s | pace(true) }}</dd>{% endif %}
     {% if run.interval_total_km %}
     <dt>Covered by the reps</dt>
     <dd>{{ run.interval_total_km | km }} km of the
       {{ run.distance_km | km }} km run</dd>{% endif %}
+    {% if run.interval_total_s %}
+    <dt>Spent on the reps</dt>
+    <dd>{{ run.interval_total_s | duration }} of the
+      {{ run.duration_s | duration }} run</dd>{% endif %}
   </dl>
-  <p class="caption" style="margin:.6rem 0 0">The pace is the split over the
-    interval distance, worked out rather than stored, so it cannot disagree
-    with the two figures above it.</p>
+  <p class="caption" style="margin:.6rem 0 0">All three are as entered, none
+    worked out from the others. The pace is not the time a rep took unless the
+    reps happened to be kilometres — ten-second reps are 0:10 each at something
+    nearer 3:00/km.</p>
 </div>
 {% elif run.run_type == 'Intervals' %}
 <h2>Interval session</h2>
 <div class="card">
   <p class="muted">Flagged as intervals, but nothing recorded about them yet.
     <a href="{{ url_for('runs.input_page', id=run.id) }}">Add the detail</a> —
-    how they were set, how many, how long and the average split.</p>
+    how they were set, how many, the distance and the time per interval.</p>
 </div>
 {% endif %}
 

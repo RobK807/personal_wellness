@@ -177,34 +177,55 @@ duplicating it.
 ### Interval sessions
 
 A run flagged **Intervals** can carry the shape of the session as well as the
-run: how it was set, how many reps, how long each was and the average split.
-Four nullable columns on `runs`, so every run recorded before this existed
+run. Five nullable columns on `runs`, so every run recorded before this existed
 simply reads blank.
 
-| column | `8 x 1k @ 3:50` | `6 x 3min @ 783m` |
+| column | `8 x 1k @ 3:50/km` | `10 x 0:10 @ 3:00/km` |
 | --- | --- | --- |
 | `interval_type` | `distance` | `time` |
-| `interval_count` | 8 | 6 |
-| `interval_distance_m` | 1000 *(the target)* | 783 *(what happened)* |
-| `interval_split_s` | 3:50 *(what happened)* | 3:00 *(the target)* |
+| `interval_count` | 8 | 10 |
+| `interval_distance_m` | 1000 | — *(no set distance)* |
+| `interval_time_s` | — *(no set time)* | 0:10 |
+| `interval_pace_s` | 3:50 | 3:00 |
 
-`interval_type` is what says which of the middle two was prescribed and which
-was the outcome. Both are kept either way, which is what makes the **average
-split** and the **average pace** both available for both kinds of session — the
-pace being `split ÷ distance`, derived in `v_runs` rather than stored, so it
-cannot drift from the two columns it comes from. For 1k reps the two are the
-same number; for 400m reps they are 1:32 and 3:50, which is the case the shape
-had to get right.
+`interval_type` says how the session was set, and so **which of the two length
+boxes applies**. A session set by distance fixes how far each rep is and lets
+the clock fall where it may; one set by time does the reverse. The box that
+does not apply is refused rather than quietly dropped, because silently
+discarding something typed into a form is how an afternoon's entry disappears.
+
+**Every field is entered; none is worked out from another.** That is a
+deliberate exception to the rule the rest of the tracker follows, and
+ten-second sprints are the case that forces it: the reps are 0:10 each at a
+pace of something like 3:00/km, and with no distance recorded there is nothing
+to divide. `interval_pace_s` is the only stored pace in the database. It is
+safe to store precisely because nothing else holds the same fact — there is no
+second copy for it to drift from, which is the actual reason pace is derived
+everywhere else.
 
 Distances are typed as `400m`, `1k` or `1.6km`, because that is how the
-sessions are named. The form refuses a length with no type (there would be no
-telling whether it was metres or minutes) and a session whose reps add up to
-more than the run they sit inside.
+sessions are named; times and paces as `mm:ss`. The form refuses:
+
+- a length with no type — the type is what says which box applies;
+- a distance per rep on a session set by time, or a time per rep on one set by
+  distance;
+- a session whose reps add up to more than the run they sit inside, in
+  kilometres or on the clock;
+- a time in the distance box — `3:00` and `3min` are caught by shape, and the
+  message points at the box that wanted them;
+- a pace outside 1:30–20:00 per kilometre, which is what catches the rep time
+  typed into the pace box. `0:10` there is ten seconds per kilometre.
 
 The Log page lists the runs the spreadsheet called intervals that have no
 detail yet, with each one's best 400m and best 1K beside it as a prompt — a
-session of 1k reps usually has a best 1K close to its average split. The list
-empties itself as they are filled in.
+session of 1k reps usually has a best 1K close to its pace per interval. The
+list empties itself as they are filled in.
+
+An earlier cut of this stored a time per rep and divided out the pace. It only
+worked for sessions set by distance, and `core/db.py _convert_interval_splits`
+brings a database holding that column forward: the pace it should always have
+had is worked out per row, the rep time is kept only where the session was set
+by time, and the old column is dropped.
 
 None of this is in the spreadsheet, so **`--rebuild` preserves it**: the
 importer keeps the interval columns against each run's identity and puts them

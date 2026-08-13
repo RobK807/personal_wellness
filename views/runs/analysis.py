@@ -14,6 +14,15 @@ from views import run_frames as frames
 from views.runs import filters
 
 
+def _totalled(row: dict) -> str:
+    """What the reps came to between them, in the unit the session was set in."""
+    if row.get("interval_total_km"):
+        return f"{row['interval_total_km']:,.1f} km"
+    if row.get("interval_total_s"):
+        return runs.fmt_duration(row["interval_total_s"])
+    return "—"
+
+
 def _intervals(args: dict) -> None:
     """The structured sessions, and the ones still waiting to be filled in."""
     sessions = frames.interval_sessions(**args)
@@ -29,14 +38,12 @@ def _intervals(args: dict) -> None:
               "Session": runs.interval_summary(row),
               "Set by": row["interval_type"],
               "Reps": row["interval_count"] or "—",
-              "Each": (runs.fmt_interval_distance(row["interval_distance_m"])
-                       if row["interval_distance_m"] else "—"),
-              "Average split": (runs.fmt_duration(row["interval_split_s"])
-                                if row["interval_split_s"] else "—"),
-              "Average pace": (runs.fmt_pace(row["interval_pace_s"])
-                               if row["interval_pace_s"] else "—"),
-              "Reps covered": (f"{row['interval_total_km']:,.1f} km"
-                               if row["interval_total_km"] else "—"),
+              # One column, because only one of the two length boxes applies:
+              # '1k' for a session set by distance, '0:10' for one set by time.
+              "Each": runs.interval_length(row) or "—",
+              "Pace each": (runs.fmt_pace(row["interval_pace_s"])
+                            if row["interval_pace_s"] else "—"),
+              "Reps totalled": _totalled(row),
               "Whole run": f"{row['distance_km']:,.1f} km at "
                            f"{runs.fmt_pace(row['pace_s'])}"}
              for row in sessions.to_dict("records")],
@@ -45,15 +52,21 @@ def _intervals(args: dict) -> None:
         line = (f"{totals['sessions']} session"
                 f"{'' if totals['sessions'] == 1 else 's'}")
         if totals["reps"]:
-            line += (f", {totals['reps']} reps covering "
-                     f"{totals['rep_km']:,.1f} km")
+            line += f", {totals['reps']} reps"
+        if totals["rep_km"]:
+            line += f" covering {totals['rep_km']:,.1f} km"
+        if totals["rep_seconds"]:
+            line += (f"{' and' if totals['rep_km'] else ' totalling'} "
+                     f"{runs.fmt_duration(totals['rep_seconds'])}")
         if totals["best_pace_s"]:
             line += f", quickest at {runs.fmt_pace(totals['best_pace_s'], True)}"
         st.caption(
-            line + ". *Average pace* is the split over the interval distance — "
-            "worked out, not stored, so it cannot disagree with the two "
-            "columns beside it. *Whole run* is there for contrast: the gap "
-            "between the two is the warm-up, the recoveries and the warm-down."
+            line + ". *Each* is one rep in the unit its own session was set in "
+            "— a distance for **8 x 1k**, a time for **10 x 0:10** — and *Pace "
+            "each* is the pace held across them, which is a different figure "
+            "from the time a rep took unless the reps were kilometres. *Whole "
+            "run* is there for contrast: the gap between the two is the "
+            "warm-up, the recoveries and the warm-down."
         )
 
     if not outstanding.empty:

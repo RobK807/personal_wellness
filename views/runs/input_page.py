@@ -142,15 +142,16 @@ def _interval_fields(editing: dict | None) -> dict:
     st.markdown("**Interval session**")
     st.caption(
         "For a session run as reps; leave it blank for anything else. *Type* "
-        "says which of the next two was the target: **8 x 1k @ 3:50** sets the "
-        "kilometre and the 3:50 is what happened, **6 x 3min @ 783m** sets the "
-        "three minutes and the distance is what happened. Both are kept either "
-        "way, so the average split and the average pace both follow from them."
+        "says how the session was set, and so which of the two length boxes to "
+        "fill in: **8 x 1k @ 3:50/km** is set by distance and has no time per "
+        "rep, **10 x 0:10 @ 3:00/km** is set by time and covers no set "
+        "distance. The pace is filled in either way, and every box is typed — "
+        "nothing here is worked out from anything else."
     )
 
     options = ["", *config.INTERVAL_TYPES]
     current = (editing or {}).get("interval_type") or ""
-    left, middle, right, far = st.columns(4)
+    left, middle = st.columns(2)
     kind = left.selectbox(
         "Type", options, index=options.index(current),
         format_func=lambda value: ("Not an interval session" if not value
@@ -159,26 +160,33 @@ def _interval_fields(editing: dict | None) -> dict:
         "How many",
         value=str((editing or {}).get("interval_count") or ""),
         placeholder="8")
-    distance = right.text_input(
+
+    left, middle, right = st.columns(3)
+    distance = left.text_input(
         "Distance per interval",
         value=(runs.fmt_interval_distance((editing or {})["interval_distance_m"])
                if editing and editing.get("interval_distance_m") else ""),
-        placeholder="1k, 400m or 1.6km")
-    split = far.text_input(
-        "Average split",
-        value=(runs.fmt_duration((editing or {})["interval_split_s"])
-               if editing and editing.get("interval_split_s") else ""),
-        placeholder="3:50")
+        placeholder="1k, 400m or 1.6km",
+        help=config.INTERVAL_FIELD_HELP["interval_distance_m"])
+    length = middle.text_input(
+        "Time per interval",
+        value=(runs.fmt_duration((editing or {})["interval_time_s"])
+               if editing and editing.get("interval_time_s") else ""),
+        placeholder="3:00",
+        help=config.INTERVAL_FIELD_HELP["interval_time_s"])
+    rep_pace = right.text_input(
+        "Pace per interval",
+        value=(runs.fmt_duration((editing or {})["interval_pace_s"])
+               if editing and editing.get("interval_pace_s") else ""),
+        placeholder="3:50",
+        help=config.INTERVAL_FIELD_HELP["interval_pace_s"])
 
-    if editing and editing.get("interval_pace_s"):
-        st.caption(
-            f"Currently {runs.fmt_duration(editing['interval_split_s'])} per "
-            f"interval, which over "
-            f"{runs.fmt_interval_distance(editing['interval_distance_m'])} is "
-            f"**{runs.fmt_pace(editing['interval_pace_s'], True)}**.")
+    if editing and editing.get("interval_type"):
+        st.caption(f"Currently **{runs.interval_summary(editing)}**.")
 
     return {"interval_type": kind, "interval_count": count,
-            "interval_distance_m": distance, "interval_split_s": split}
+            "interval_distance_m": distance, "interval_time_s": length,
+            "interval_pace_s": rep_pace}
 
 
 def _outstanding() -> None:
@@ -200,7 +208,7 @@ def _outstanding() -> None:
          for row in rows],
         hide_index=True, width="stretch")
     st.caption("The two best-effort columns are a prompt: a session of 1k reps "
-               "usually has a best 1K close to its average split. Pick one "
+               "usually has a best 1K close to its time per interval. Pick one "
                "below to fill it in.")
 
     labels = {

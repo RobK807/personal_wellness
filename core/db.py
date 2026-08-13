@@ -58,7 +58,8 @@ MIGRATIONS = {
         ("interval_type", "TEXT"),
         ("interval_count", "INTEGER"),
         ("interval_distance_m", "REAL"),
-        ("interval_split_s", "INTEGER"),
+        ("interval_time_s", "INTEGER"),
+        ("interval_pace_s", "INTEGER"),
     ],
 }
 
@@ -69,6 +70,7 @@ def init_db(db_path: Path | None = None) -> None:
     try:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _add_missing_columns(conn)
+        _convert_interval_splits(conn)
     finally:
         conn.close()
 
@@ -95,6 +97,61 @@ def _add_missing_columns(conn: sqlite3.Connection) -> list:
     if applied:
         log(conn, "migrate", "schema", None, f"added {', '.join(applied)}")
     return applied
+
+
+def _convert_interval_splits(conn: sqlite3.Connection) -> int:
+    """Carry the short-lived `interval_split_s` column over to its replacements.
+
+    The first cut of interval tracking held a time per rep and worked the pace
+    out from it. That only works for a session set by distance, so the pace is
+    now entered and the time per rep is kept only for sessions set by time -
+    see core/schema.sql. This moves what was already recorded across:
+
+        set by distance   the pace, which is the split over the rep distance
+        set by time       the time per rep, unchanged; no pace to recover
+
+    Both directions are arithmetic on that row alone, so nothing is guessed.
+    Runs entered as 1k reps come out with the same number in the pace column
+    they had in the split column, which is right - over a kilometre the two
+    are the same figure.
+
+    Idempotent: it only touches rows whose replacements are still empty, so a
+    second start finds nothing to do. Returns how many rows it converted.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
+    if "interval_split_s" not in columns:
+        return 0
+
+    converted = conn.execute("""
+        UPDATE runs
+           SET interval_pace_s = CASE
+                   WHEN interval_type = 'distance' AND interval_distance_m > 0
+                   THEN CAST(ROUND(interval_split_s
+                                   / (interval_distance_m / 1000.0)) AS INTEGER)
+               END,
+               interval_time_s = CASE
+                   WHEN interval_type = 'time' THEN interval_split_s
+               END
+         WHERE interval_split_s IS NOT NULL
+           AND interval_pace_s IS NULL
+           AND interval_time_s IS NULL
+    """).rowcount
+
+    # The old column has no meaning now. Dropping it needs SQLite 3.35, and an
+    # older one simply keeps an unused column - untidy, never wrong, and not
+    # worth rebuilding the table over.
+    dropped = False
+    try:
+        conn.execute("ALTER TABLE runs DROP COLUMN interval_split_s")
+        dropped = True
+    except sqlite3.OperationalError:
+        pass
+
+    if converted or dropped:
+        log(conn, "migrate", "schema", None,
+            f"interval_split_s: {converted} row(s) converted"
+            + (", column dropped" if dropped else ", column left in place"))
+    return converted
 
 
 @contextmanager

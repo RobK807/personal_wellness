@@ -212,48 +212,45 @@ def run_tracker(client) -> None:
 
     resp = client.post(RUNS + f"/log?id={session['id']}", data={
         **base, "interval_type": "distance", "interval_count": "8",
-        "interval_distance_m": "1k", "interval_split_s": "3:50"},
+        "interval_distance_m": "1k", "interval_pace_s": "3:50"},
         follow_redirects=True)
     check("saved without complaint",
           'class="flash flash-error"' in resp.get_data(as_text=True), False)
     entered = run_queries.run(session["id"])
     check("count", entered["interval_count"], 8)
     check("distance per rep, from '1k'", entered["interval_distance_m"], 1000.0)
-    check("split", runs.fmt_duration(entered["interval_split_s"]), "3:50")
-    # Derived, never stored: 230 seconds over one kilometre.
-    check("pace is derived", runs.fmt_pace(entered["interval_pace_s"]), "3:50")
+    check("pace per rep, as entered",
+          runs.fmt_pace(entered["interval_pace_s"]), "3:50")
+    # Set by distance, so there is no time per rep to hold and none is stored.
+    check("no time per rep on a distance session", entered["interval_time_s"],
+          None)
     check("reps covered", entered["interval_total_km"], 8.0)
     check("reads back in shorthand",
-          runs.interval_summary(entered), "8 x 1k @ 3:50")
+          runs.interval_summary(entered), "8 x 1k @ 3:50 /km")
     check("shown on the run's page",
-          "8 x 1k @ 3:50" in
+          "8 x 1k @ 3:50 /km" in
           client.get(RUNS + f"/run/{session['id']}").get_data(as_text=True), True)
     check("and listed on the analysis page",
-          "8 x 1k @ 3:50" in
+          "8 x 1k @ 3:50 /km" in
           client.get(RUNS + "/analysis?range=All").get_data(as_text=True), True)
 
-    # 400m reps: the split and the pace are different figures, which is the
-    # case the single-column design had to get right.
+    # Ten-second sprints: the case that makes the pace its own field. The reps
+    # are 0:10 each and the pace is nothing like 0:10, and no arithmetic
+    # available here gets from one to the other.
     client.post(RUNS + f"/log?id={session['id']}", data={
-        **base, "interval_type": "distance", "interval_count": "12",
-        "interval_distance_m": "400m", "interval_split_s": "1:32"},
+        **base, "interval_type": "time", "interval_count": "10",
+        "interval_time_s": "0:10", "interval_pace_s": "3:00"},
         follow_redirects=True)
     entered = run_queries.run(session["id"])
-    check("a 400m rep's split", runs.fmt_duration(entered["interval_split_s"]),
-          "1:32")
-    check("is a different figure from its pace",
-          runs.fmt_pace(entered["interval_pace_s"]), "3:50")
-
-    # A time-based session: the length is the duration, the distance is what
-    # happened, and the pace still falls out of the same two columns.
-    client.post(RUNS + f"/log?id={session['id']}", data={
-        **base, "interval_type": "time", "interval_count": "6",
-        "interval_distance_m": "783m", "interval_split_s": "3:00"},
-        follow_redirects=True)
-    entered = run_queries.run(session["id"])
+    check("a 0:10 rep", runs.fmt_duration(entered["interval_time_s"]), "0:10")
+    check("at a pace nothing like it",
+          runs.fmt_pace(entered["interval_pace_s"]), "3:00")
+    check("no distance per rep on a time session",
+          entered["interval_distance_m"], None)
+    check("10 x 0:10 comes to", runs.fmt_duration(entered["interval_total_s"]),
+          "1:40")
     check("time-based reads back",
-          runs.interval_summary(entered), "6 x 3:00 @ 783 m")
-    check("with a pace", runs.fmt_pace(entered["interval_pace_s"]), "3:50")
+          runs.interval_summary(entered), "10 x 0:10 @ 3:00 /km")
 
     print("\nrun tracker: the interval fields refuse what makes no sense")
     for label, override in [
@@ -262,24 +259,63 @@ def run_tracker(client) -> None:
         ("reps longer than the run", {"interval_type": "distance",
                                       "interval_count": "40",
                                       "interval_distance_m": "1k"}),
+        ("reps that outlast the run", {"interval_type": "time",
+                                       "interval_count": "40",
+                                       "interval_time_s": "5:00"}),
         ("a distance that is not one", {"interval_type": "distance",
                                         "interval_distance_m": "ish"}),
-        ("a split that is not a time", {"interval_type": "distance",
-                                        "interval_split_s": "quick"}),
+        ("a time that is not one", {"interval_type": "time",
+                                    "interval_time_s": "quick"}),
+        # Each length box belongs to one kind of session. The other is refused
+        # rather than dropped: silently discarding a typed value is worse.
+        ("a distance on a session set by time", {"interval_type": "time",
+                                                 "interval_time_s": "3:00",
+                                                 "interval_distance_m": "783m"}),
+        ("a time on a session set by distance", {"interval_type": "distance",
+                                                 "interval_distance_m": "1k",
+                                                 "interval_time_s": "3:50"}),
+        ("a written time in the distance box", {"interval_type": "distance",
+                                                "interval_distance_m": "3:00"}),
+        ("'3min' in the distance box", {"interval_type": "distance",
+                                        "interval_distance_m": "3min"}),
+        # The pace box is the easiest to fill in with the wrong thing: the rep
+        # time instead of the pace. 0:10 per kilometre is not a pace.
+        ("the rep time in the pace box", {"interval_type": "time",
+                                          "interval_count": "10",
+                                          "interval_time_s": "0:10",
+                                          "interval_pace_s": "0:10"}),
     ]:
         body = client.post(RUNS + f"/log?id={session['id']}",
                            data={**base, **override},
                            follow_redirects=True).get_data(as_text=True)
         check(f"refuses {label}", 'class="flash flash-error"' in body, True)
 
+    # ...and none of that gets in the way of the sessions that are real.
+    print("\nrun tracker: real sessions still go in")
+    for label, override in [
+        ("100m strides", {"interval_type": "distance", "interval_count": "8",
+                          "interval_distance_m": "100m",
+                          "interval_pace_s": "3:00"}),
+        ("hill reps by time", {"interval_type": "time", "interval_count": "8",
+                               "interval_time_s": "1:00",
+                               "interval_pace_s": "4:10"}),
+        ("2k reps", {"interval_type": "distance", "interval_count": "3",
+                     "interval_distance_m": "2k", "interval_pace_s": "4:10"}),
+        ("a part-entered session", {"interval_type": "distance",
+                                    "interval_distance_m": "1k"}),
+    ]:
+        body = client.post(RUNS + f"/log?id={session['id']}",
+                           data={**base, **override},
+                           follow_redirects=True).get_data(as_text=True)
+        check(f"accepts {label}", 'class="flash flash-error"' in body, False)
+
     print("\nrun tracker: clearing the interval fields empties them")
     client.post(RUNS + f"/log?id={session['id']}", data=base,
                 follow_redirects=True)
     cleared = run_queries.run(session["id"])
-    check("all four are null again",
-          [cleared[key] for key in ("interval_type", "interval_count",
-                                    "interval_distance_m", "interval_split_s")],
-          [None, None, None, None])
+    check("all five are null again",
+          [cleared[key] for key in runs.INTERVAL_FIELDS],
+          [None, None, None, None, None])
 
     print("\nrun tracker: deleting takes the splits with it")
     splits_before = db.scalar("SELECT COUNT(*) FROM run_bests", default=0)

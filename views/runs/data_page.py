@@ -67,17 +67,19 @@ def _detail(rows) -> None:
         st.markdown(f"**Interval session:** {runs.interval_summary(row)}")
         columns = st.columns(4)
         columns[0].metric("Intervals", row["interval_count"] or "—")
-        columns[1].metric("Distance each",
-                          runs.fmt_interval_distance(row["interval_distance_m"])
-                          if row["interval_distance_m"] else "—")
-        columns[2].metric("Average split",
-                          runs.fmt_duration(row["interval_split_s"])
-                          if row["interval_split_s"] else "—")
-        columns[3].metric("Average pace",
+        columns[1].metric("Each", runs.interval_length(row) or "—",
+                          help="One rep, in the unit this session was set in.")
+        columns[2].metric("Pace each",
                           runs.fmt_pace(row["interval_pace_s"], True)
                           if row["interval_pace_s"] else "—",
-                          help="The split over the interval distance, worked "
-                               "out rather than stored.")
+                          help="The pace held across the reps, as entered. Not "
+                               "the time a rep took, unless the reps were "
+                               "kilometres.")
+        columns[3].metric(
+            "Reps totalled",
+            f"{row['interval_total_km']:,.2f} km" if row["interval_total_km"]
+            else runs.fmt_duration(row["interval_total_s"])
+            if row["interval_total_s"] else "—")
     elif row["run_type"] == "Intervals":
         st.info("Flagged as intervals, but nothing recorded about them yet — "
                 "the Log page has the form.")

@@ -323,6 +323,16 @@ dl.facts dd { margin: 0; word-break: break-all; }
 .ladder label { display: flex; justify-content: space-between; gap: .5rem; }
 .ladder .rung-km { color: var(--muted); font-size: .75rem; }
 
+/* The two interval boxes are the easiest pair on the form to mix up - one
+   takes a distance and one takes a time, whichever way round the session was
+   set - so each label carries the shape it accepts and a line underneath
+   saying which half of the session it is. */
+.field label.two-part { display: flex; justify-content: space-between;
+                        gap: .5rem; }
+.field label .shape { color: var(--muted); font-size: .75rem; font-weight: 400;
+                      white-space: nowrap; }
+.field .field-help { margin: .25rem 0 0; }
+
 /* Records: one card per breakdown distance, side by side where there is room. */
 .records { display: grid; gap: 1rem; }
 @media (min-width: 760px) { .records { grid-template-columns: 1fr 1fr; } }

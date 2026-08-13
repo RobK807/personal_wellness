@@ -223,29 +223,66 @@ TOP_N = 5
 # --------------------------------------------------------------------------- #
 # Interval sessions
 # --------------------------------------------------------------------------- #
-# A structured session is "N reps of <something>, averaging <something else>",
-# and which of the two is prescribed depends on how it was set:
+# A structured session is "N reps of <a length>, at <a pace>", and how it was
+# set decides what kind of length that is:
 #
-#   distance   8 x 1k @ 3:50    the 1k is prescribed, the 3:50 is what happened
-#   time       6 x 3min @ 783m  the 3min is prescribed, the distance happened
+#   distance   8 x 1k @ 3:50/km     the rep is a distance, and has no set time
+#   time       10 x 0:10 @ 3:00/km  the rep is a duration, and covers no set
+#                                   distance
 #
-# So both are stored - `interval_distance_m` and `interval_split_s` - and
-# `interval_type` says which one was the target. Pace is not stored: it is the
-# split over the distance, the same rule the whole run tracker follows, and a
-# stored copy is one edit away from disagreeing with the two columns it came
-# from. See core/runs.py interval_summary().
+# So there are three entered fields and each is entered, never worked out:
+#
+#   interval_distance_m   how far each rep was     set by distance only
+#   interval_time_s       how long each rep was    set by time only
+#   interval_pace_s       the average pace held    both
+#
+# The pace is the only figure that means something for both kinds, and it has
+# to be typed rather than divided out. Ten-second sprints are the case that
+# settles it: the time is 0:10 and the pace is nothing like 0:10, and there is
+# no distance recorded to get from one to the other. Storing it breaks the rule
+# the rest of the tracker follows, and does so safely - nothing else holds the
+# same fact, so there is no second copy for it to drift from.
 INTERVAL_TYPES = ["distance", "time"]
 
 INTERVAL_TYPE_LABELS = {
     "distance": "Distance (e.g. 8 x 1k)",
-    "time": "Time (e.g. 6 x 3min)",
+    "time": "Time (e.g. 10 x 0:10)",
 }
 
-# Fat-finger guards, in the same spirit as RUN_BOUNDS.
+# Which length field belongs to which type. One list, read by the parser and
+# by both input forms, so they cannot disagree about which box applies.
+INTERVAL_LENGTH_FIELD = {
+    "distance": "interval_distance_m",
+    "time": "interval_time_s",
+}
+
+# The wording the input forms use, kept here so Flask and Streamlit cannot
+# label the same box two different ways.
+INTERVAL_FIELD_HELP = {
+    "interval_distance_m": "How far each rep was — 400m, 1k, 1.6km. Only for a "
+                           "session set by distance; leave it blank for one set "
+                           "by time.",
+    "interval_time_s": "How long each rep was — 3:00 for three minutes, 0:10 "
+                       "for ten seconds. Only for a session set by time; leave "
+                       "it blank for one set by distance.",
+    "interval_pace_s": "The average pace held across the reps, in minutes per "
+                       "kilometre. Filled in either way, and not the same thing "
+                       "as the time per rep: ten-second sprints are 0:10 each "
+                       "at something like 3:00/km.",
+}
+
+# Fat-finger guards, in the same spirit as RUN_BOUNDS. Wide enough that a real
+# session never trips one.
+#
+# The pace bound is the one that earns its keep, because the pace box is the
+# easiest to fill in with the wrong thing: 0:10 typed there for a ten-second
+# sprint is ten seconds per kilometre, and 1:00 is a world record twice over.
+# 1:30/km is about 11 m/s, quicker than anyone has ever run 100 m.
 INTERVAL_BOUNDS = {
     "interval_count": (1, 200),
     "interval_distance_m": (20.0, 100_000.0),
-    "interval_split_s": (5, 7200),
+    "interval_time_s": (3, 7200),
+    "interval_pace_s": (90, 1200),
 }
 
 # Fat-finger guards for the run input form, in the same spirit as the weigh-in
