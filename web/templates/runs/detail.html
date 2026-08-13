@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ run.day | period }} · Run tracker{% endblock %}
+
+{% block content %}
+<h1>{{ run.distance_km | km }} km on {{ run.day | period }}</h1>
+<p class="caption">
+  {{ run.run_type }} · {{ run.effort_type }}
+  {%- if run.note %} · {{ run.note }}{% endif %}
+  {%- if run.source == 'strava' %} · imported from the scrape{% endif %}
+</p>
+
+<div class="metrics">
+  <div class="metric">
+    <span class="label">Distance</span>
+    <span class="value">{{ run.distance_km | km }}<span class="unit"> km</span></span>
+  </div>
+  <div class="metric">
+    <span class="label">Time</span>
+    <span class="value">{{ run.duration_s | duration }}</span>
+  </div>
+  <div class="metric">
+    <span class="label">Pace</span>
+    <span class="value">{{ run.pace_s | pace }}<span class="unit"> /km</span></span>
+  </div>
+  <div class="metric">
+    <span class="label">Best efforts</span>
+    <span class="value">{{ run.breakdowns }}</span>
+  </div>
+</div>
+
+{% if run.interval_type %}
+<h2>Interval session</h2>
+<div class="card">
+  <h3>{{ run | intervals }}</h3>
+  <dl class="facts">
+    <dt>Set by</dt>
+    <dd>{{ 'Distance — the length was the target' if run.interval_type == 'distance'
+           else 'Time — the duration was the target' }}</dd>
+    {% if run.interval_count %}<dt>Intervals</dt><dd>{{ run.interval_count }}</dd>{% endif %}
+    {% if run.interval_distance_m %}
+    <dt>Distance each</dt><dd>{{ run.interval_distance_m | intervaldist }}</dd>{% endif %}
+    {% if run.interval_split_s %}
+    <dt>Average split</dt><dd>{{ run.interval_split_s | duration }}</dd>{% endif %}
+    {% if run.interval_pace_s %}
+    <dt>Average pace</dt><dd>{{ run.interval_pace_s | pace(true) }}</dd>{% endif %}
+    {% if run.interval_total_km %}
+    <dt>Covered by the reps</dt>
+    <dd>{{ run.interval_total_km | km }} km of the
+      {{ run.distance_km | km }} km run</dd>{% endif %}
+  </dl>
+  <p class="caption" style="margin:.6rem 0 0">The pace is the split over the
+    interval distance, worked out rather than stored, so it cannot disagree
+    with the two figures above it.</p>
+</div>
+{% elif run.run_type == 'Intervals' %}
+<h2>Interval session</h2>
+<div class="card">
+  <p class="muted">Flagged as intervals, but nothing recorded about them yet.
+    <a href="{{ url_for('runs.input_page', id=run.id) }}">Add the detail</a> —
+    how they were set, how many, how long and the average split.</p>
+</div>
+{% endif %}
+
+<h2>Best efforts</h2>
+{% if bests %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Distance</th><th class="num">Time</th><th class="num">Pace</th>
+        <th>Standing</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for best in bests %}
+      <tr {% if best.suspect %}class="flagged"{% endif %}>
+        <td>
+          {{ best.breakdown }}
+          {% if best.suspect %}<span class="tag flagged"
+            title="Contradicts the run it came from, so it is left out of the records">flagged</span>{% endif %}
+        </td>
+        <td class="num">{{ best.seconds | duration }}</td>
+        <td class="num">{{ best.pace_s | pace }}</td>
+        <td>
+          {% set position = positions[best.breakdown] %}
+          {% if position %}
+            <span class="position {{ 'first' if position == 1 }}">{{ position | ordinal }}
+              {{ 'fastest ever' if position == 1 else 'best' }}</span>
+          {% else %}
+            <span class="muted small">outside the top {{ top_n }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">Each row is the fastest stretch of that length anywhere in
+  this run, not a lap. Standing is against every run ever recorded, unfiltered.</p>
+{% else %}
+<p class="muted">No best efforts recorded for this run.</p>
+{% endif %}
+
+{% if same_day %}
+<h2>Also on {{ run.day | period }}</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th class="num">Distance</th><th class="num">Time</th>
+          <th class="num">Pace</th><th>Type</th><th>Effort</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for other in same_day %}
+      <tr>
+        <td class="num">{{ other.distance_km | km }}</td>
+        <td class="num">{{ other.duration_s | duration }}</td>
+        <td class="num">{{ other.pace_s | pace }}</td>
+        <td>{{ other.run_type }}</td>
+        <td>{{ other.effort_type }}</td>
+        <td><a class="button small" href="{{ url_for('runs.detail', run_id=other.id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p class="actions" style="margin-top:1.2rem">
+  <a class="button primary" href="{{ url_for('runs.input_page', id=run.id) }}">Edit this run</a>
+  <a class="button" href="{{ url_for('runs.data') }}">All runs</a>
+</p>
+
+<form method="post" action="{{ url_for('runs.delete', run_id=run.id) }}"
+      class="actions" style="margin-top:.6rem"
+      onsubmit="return confirm('Delete this run and its best efforts?')">
+  <input type="hidden" name="next" value="{{ url_for('runs.data') }}">
+  <button class="danger small">Delete this run</button>
+  <span class="muted small">Its best efforts go with it.</span>
+</form>
+{% endblock %}

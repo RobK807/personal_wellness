@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Admin · Run tracker{% endblock %}
+
+{% block content %}
+<h1>Admin</h1>
+<p class="caption">What was imported, what the source sheet got wrong, and where
+  everything lives.</p>
+
+<div class="card">
+  <h3>Coverage</h3>
+  <dl class="facts">
+    <dt>Runs</dt><dd>{{ coverage.runs }}</dd>
+    <dt>Between</dt>
+    <dd>{{ coverage.first_day | period }} and {{ coverage.last_day | period }}
+      — {{ coverage.span_days }} days</dd>
+    <dt>Distance</dt><dd>{{ coverage.distance_km | km(1) }} km</dd>
+    <dt>Time</dt><dd>{{ coverage.duration_s | duration(true) }}</dd>
+    <dt>Best efforts</dt><dd>{{ coverage.splits }}</dd>
+    <dt>Runs without any</dt><dd>{{ coverage.without_splits }}</dd>
+  </dl>
+</div>
+
+<h2>Splits that cannot be true</h2>
+{% if anomalies %}
+<p class="caption">
+  {{ anomalies | length }} of the imported splits contradict the run they came
+  from. They are kept — the run happened, and the figure is the figure the
+  scrape produced — but they are left out of the records and the per-distance
+  averages, because a table of bests should only hold times that could have
+  happened. Nothing entered through the form can add to this list.
+</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Split</th><th class="num">Split time</th>
+          <th class="num">The run</th><th>Why it cannot be</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in anomalies %}
+      <tr class="flagged">
+        <td class="day">{{ row.day | period }}</td>
+        <td>{{ row.breakdown }}</td>
+        <td class="num">{{ row.seconds | duration }}</td>
+        <td class="num">{{ row.distance_km | km }} km in {{ row.duration_s | duration }}</td>
+        <td class="small">{{ row.reason }}</td>
+        <td><a class="button small" href="{{ url_for('runs.detail', run_id=row.run_id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">
+  Fixing these means fixing the sheet rather than the dashboard — correct the
+  run's distance or elapsed time, re-import, and they disappear.
+</p>
+{% else %}
+<p class="muted">None — every split is consistent with the run it came from.
+  Eighteen were not, until the runs' elapsed times were corrected at source in
+  August 2026.</p>
+{% endif %}
+
+<h2>The breakdown ladder</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Distance</th><th class="num">km</th><th class="num">Runs reaching it</th>
+          <th class="num">Best</th><th class="num">Set aside</th></tr>
+    </thead>
+    <tbody>
+      {% set reached = {} %}
+      {% for row in by_distance %}{% set _ = reached.update({row.breakdown: row}) %}{% endfor %}
+      {% for label, km in breakdowns %}
+      {% set row = reached.get(label) %}
+      <tr>
+        <td>{{ label }}</td>
+        <td class="num">{{ '%.3f'|format(km)|float }}</td>
+        <td class="num">{{ row.runs if row else 0 }}</td>
+        <td class="num">{{ row.best_seconds | duration if row else '-' }}</td>
+        <td class="num">{{ row.set_aside or '' if row else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">The rungs are Strava's, and the whole vocabulary of the
+  <em>Breakdown</em> column. A run only carries the ones it was long enough to
+  reach.</p>
+
+<h2>Re-importing</h2>
+<div class="card">
+  <p class="small">Runs are matched on date, distance and elapsed time, so
+    re-running the importer updates what has changed and adds what is new
+    without duplicating anything or touching runs entered by hand.</p>
+  <pre>python -m core.strava_import           # update from the sheet
+python -m core.strava_import --rebuild  # discard imported runs and start again</pre>
+  <p class="small muted">Run it on a desktop: openpyxl opening the workbook
+    needs more memory than the NAS has free.</p>
+</div>
+
+<div class="card">
+  <h3>Where things are</h3>
+  <dl class="facts">
+    <dt>Database</dt><dd>{{ db_path }}</dd>
+    <dt>Workbook</dt><dd>{{ workbook }}</dd>
+    <dt>Tab</dt><dd>{{ sheet }}</dd>
+  </dl>
+</div>
+
+<h2>Recent changes</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for row in trail %}
+      <tr>
+        <td class="day small">{{ row.ts }}</td>
+        <td class="small">{{ row.action }}</td>
+        <td class="small muted">{{ row.detail }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">Nothing yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

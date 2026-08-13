@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Analysis · Run tracker{% endblock %}
+
+{% macro summary_table(rows, heading) %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>{{ heading }}</th>
+        <th class="num">Runs</th>
+        <th class="num">Distance</th>
+        <th class="num">Time</th>
+        <th class="num">Pace</th>
+        <th class="num">Quickest</th>
+        <th class="num">Average run</th>
+        <th class="num">Longest</th>
+        <th>Last</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td class="num">{{ row.runs }}</td>
+        <td class="num">{{ row.distance_km | km(1) }} km</td>
+        <td class="num">{{ row.duration_s | duration(true) }}</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+        <td class="num">{{ row.best_pace_s | pace }}</td>
+        <td class="num">{{ row.avg_distance_km | km(1) }} km</td>
+        <td class="num">{{ row.longest_km | km(1) }} km</td>
+        <td class="day">{{ row.last_day | period }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">Nothing matches the filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+<h1>Analysis</h1>
+<p class="caption">
+  How the running splits by the two ways the spreadsheet classifies it. Pace
+  across a group is its total time over its total distance rather than the mean
+  of each run's pace — a 20 km plod and a 2 km sprint should not count equally
+  towards how fast the running was.
+</p>
+
+{% set hidden = {'grain': grain} %}
+{% include "runs/_filters.html" %}
+
+<div class="metrics">
+  <div class="metric">
+    <span class="label">Runs</span>
+    <span class="value">{{ totals.runs }}</span>
+  </div>
+  <div class="metric">
+    <span class="label">Distance</span>
+    <span class="value">{{ totals.distance_km | km(0) }}<span class="unit"> km</span></span>
+  </div>
+  <div class="metric">
+    <span class="label">Time</span>
+    <span class="value">{{ totals.duration_s | duration(true) }}</span>
+  </div>
+  <div class="metric">
+    <span class="label">Average pace</span>
+    <span class="value">{{ totals.pace_s | pace }}<span class="unit"> /km</span></span>
+  </div>
+</div>
+
+<h2>By run type</h2>
+{{ summary_table(by_run, 'Run type') }}
+<div class="grid-2" style="margin-top:1rem">
+  <div class="card"><h3>Pace</h3>{{ run_pace_chart | safe }}
+    <p class="small muted">Shorter is quicker.</p></div>
+  <div class="card"><h3>Distance</h3>{{ run_volume_chart | safe }}</div>
+</div>
+
+<h2>By effort type</h2>
+{{ summary_table(by_effort, 'Effort type') }}
+<div class="grid-2" style="margin-top:1rem">
+  <div class="card"><h3>Pace</h3>{{ effort_pace_chart | safe }}
+    <p class="small muted">Shorter is quicker.</p></div>
+  <div class="card"><h3>Distance</h3>{{ effort_volume_chart | safe }}</div>
+</div>
+
+<h2>Run type against effort type</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Run type</th><th>Effort type</th><th class="num">Runs</th>
+          <th class="num">Distance</th><th class="num">Pace</th></tr>
+    </thead>
+    <tbody>
+      {% for row in cross %}
+      <tr>
+        <td>{{ row.run_type }}</td>
+        <td>{{ row.effort_type }}</td>
+        <td class="num">{{ row.runs }}</td>
+        <td class="num">{{ row.distance_km | km(1) }} km</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">Nothing matches the filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">The combinations that are not the obvious ones are the point
+  of this grid — Race/Race says nothing, but the threshold runs that happened
+  to be weighted might.</p>
+
+{% if sessions or sessions_to_add %}
+<h2>Interval sessions</h2>
+{% if sessions %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th>Session</th><th>Set by</th><th class="num">Reps</th>
+        <th class="num">Each</th><th class="num">Average split</th>
+        <th class="num">Average pace</th><th class="num">Reps covered</th>
+        <th class="num">Whole run</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in sessions %}
+      <tr>
+        <td class="day">{{ row.day | period }}</td>
+        <td>{{ row | intervals }}</td>
+        <td class="small muted">{{ row.interval_type }}</td>
+        <td class="num">{{ row.interval_count or '—' }}</td>
+        <td class="num">{{ row.interval_distance_m | intervaldist
+                           if row.interval_distance_m else '—' }}</td>
+        <td class="num">{{ row.interval_split_s | duration
+                           if row.interval_split_s else '—' }}</td>
+        <td class="num">{{ row.interval_pace_s | pace if row.interval_pace_s else '—' }}</td>
+        <td class="num">{{ row.interval_total_km | km(1) ~ ' km'
+                           if row.interval_total_km else '—' }}</td>
+        <td class="num">{{ row.distance_km | km(1) }} km at {{ row.pace_s | pace }}</td>
+        <td><a class="button small" href="{{ url_for('runs.detail', run_id=row.id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">
+  {{ session_totals.sessions }} session{{ '' if session_totals.sessions == 1 else 's' }}
+  {%- if session_totals.reps %}, {{ session_totals.reps }} reps covering
+  {{ session_totals.rep_km | km(1) }} km{% endif %}
+  {%- if session_totals.best_pace_s %}, quickest at
+  {{ session_totals.best_pace_s | pace(true) }}{% endif %}.
+  <em>Average pace</em> is the split over the interval distance — worked out,
+  not stored, so it cannot disagree with the two columns beside it. <em>Whole
+  run</em> is there for contrast: the gap between the two is the warm-up,
+  the recoveries and the warm-down.
+</p>
+{% endif %}
+{% if sessions_to_add %}
+<p class="flash flash-warn">
+  {{ sessions_to_add }} run{{ '' if sessions_to_add == 1 else 's' }} flagged as
+  intervals {{ 'has' if sessions_to_add == 1 else 'have' }} no detail recorded
+  yet. <a href="{{ url_for('runs.input_page') }}">Fill them in</a> and they
+  appear here.
+</p>
+{% endif %}
+{% endif %}
+
+<h2>By distance</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Breakdown</th><th class="num">Runs reaching it</th>
+        <th class="num">Best</th><th class="num">Average</th>
+        <th class="num">Slowest</th><th class="num">Best pace</th>
+        <th class="num">Average pace</th><th>Last</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in by_distance %}
+      <tr>
+        <td>{{ row.breakdown }}
+          {% if row.set_aside %}<span class="tag flagged"
+            title="{{ row.set_aside }} split(s) set aside as impossible — see Admin">−{{ row.set_aside }}</span>{% endif %}
+        </td>
+        <td class="num">{{ row.runs }}</td>
+        <td class="num">{{ row.best_seconds | duration }}</td>
+        <td class="num">{{ row.avg_seconds | duration }}</td>
+        <td class="num">{{ row.worst_seconds | duration }}</td>
+        <td class="num">{{ row.best_pace_s | pace }}</td>
+        <td class="num">{{ row.avg_pace_s | pace }}</td>
+        <td class="day">{{ row.last_day | period }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">Nothing matches the filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">
+  Every rung of Strava's ladder: the fastest stretch of that length found inside
+  each run long enough to contain one. So <em>5K</em> is not a 5K race — it is
+  the best 5K within each run of at least 5 km, which is why the count falls
+  away as the distances grow. Splits the source sheet contradicts itself about
+  are set aside; the count beside the distance says how many, and the
+  <a href="{{ url_for('runs.admin') }}">Admin page</a> lists them.
+</p>
+
+<h2>Over time</h2>
+<div class="controls">
+  <div>
+    <p class="legend">Grouped</p>
+    <div class="segmented">
+      {% for name in grains %}
+      <a href="{{ url_for('runs.analysis', grain=name, **links) }}"
+         class="{{ 'on' if name == grain }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+<div class="card"><h3>Distance</h3>{{ volume_chart | safe }}</div>
+<div class="card"><h3>Pace</h3>{{ pace_chart | safe }}
+  <p class="small muted">Inverted axis: quicker is higher.</p></div>
+{% endblock %}

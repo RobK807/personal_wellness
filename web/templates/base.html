@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#17201f">
+<title>{% block title %}{{ app_title }}{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%8C%B1</text></svg>">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="{{ url_for('static', filename='chart-hover.js') }}" defer></script>
+</head>
+<body>
+
+{# The sidebar. A <nav> on desktop, a horizontal scroller on a phone - one
+   list, two layouts, and no JavaScript in either. #}
+<nav class="sidebar" aria-label="Sections">
+  <a class="brand" href="{{ url_for('home') }}">
+    <span class="brand-icon" aria-hidden="true">{{ app_icon }}</span>
+    <span class="brand-name">{{ app_title }}</span>
+  </a>
+  <ul>
+    {% for key, label, icon, endpoint in sections %}
+      <li>
+        <a href="{{ url_for(endpoint) }}"
+           class="{{ 'active' if section == key }}"
+           {{ 'aria-current=page' if section == key }}>
+          <span class="section-icon" aria-hidden="true">{{ icon }}</span>
+          <span class="section-name">{{ label }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  {% if config_password_set %}
+    <form method="post" action="{{ url_for('logout') }}" class="sign-out">
+      <button class="link">Sign out</button>
+    </form>
+  {% endif %}
+</nav>
+
+<div class="shell">
+
+  {% if section %}
+    <header class="topbar">
+      <span class="section-title">{{ section_icon }} {{ section_label }}</span>
+      {% if summary_line %}<span class="section-sub">{{ summary_line }}</span>{% endif %}
+    </header>
+
+    <nav class="tabs" aria-label="{{ section_label }} pages">
+      {% for endpoint, short, full in pages %}
+        <a href="{{ url_for(endpoint) }}" class="{{ 'active' if current == endpoint }}">
+          <span class="short">{{ short }}</span><span class="full">{{ full }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flashes">
+          {% for category, message in messages %}
+            <p class="flash flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    <span>{% block footnote %}Data lives in SQLite; the workbooks are the
+      historical source.{% endblock %}</span>
+  </footer>
+
+</div>
+
+</body>
+</html>

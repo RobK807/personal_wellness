@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Charts · Weigh-in Tracker{% endblock %}
+
+{% block content %}
+<h1>Charts</h1>
+<p class="caption">The workbook's Charts and Weekly Charts sheets, with the
+  period and the averaging both adjustable rather than fixed.</p>
+
+<div class="controls">
+  <div>
+    <p class="legend">Range</p>
+    <div class="segmented">
+      {% for name in ranges %}
+      <a href="{{ url_for('weigh_in.trends', grain=grain, range=name) }}"
+         class="{{ 'on' if name == span }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <div>
+    <p class="legend">Averaged</p>
+    <div class="segmented">
+      {% for name in grains %}
+      <a href="{{ url_for('weigh_in.trends', grain=name, range=span) }}"
+         class="{{ 'on' if name == grain }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% if not rows %}
+<p class="muted">Nothing recorded in this range.</p>
+{% else %}
+<p class="caption">{{ rows | length }}
+  {{ 'day' if grain == 'daily' else ('week' if grain == 'weekly' else 'month') }}{{ '' if rows | length == 1 else 's' }},
+  {{ rows[0].period | period(grain) }} to {{ rows[-1].period | period(grain) }}.</p>
+
+<h2>Paired</h2>
+{% for key_a, key_b, svg in pair_charts %}
+<div class="card">
+  <h3>{{ labels[key_a] }} and {{ labels[key_b] }}</h3>
+  {{ svg | safe }}
+  <p class="caption small" style="margin:.4rem 0 0">
+    {{ labels[key_a] }} on the left axis, {{ labels[key_b] }} on the right.</p>
+</div>
+{% endfor %}
+
+<h2>Individual</h2>
+{% for key, svg in single_charts %}
+<div class="card">
+  <h3>{{ labels[key] }}</h3>
+  {{ svg | safe }}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

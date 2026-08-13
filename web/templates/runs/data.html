@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Data · Run tracker{% endblock %}
+
+{% block content %}
+<h1>Data</h1>
+<p class="caption">
+  Every run, newest first. {{ totals.runs }} matching the filters —
+  {{ totals.distance_km | km(0) }} km in {{ totals.duration_s | duration(true) }},
+  averaging {{ totals.pace_s | pace(true) }}.
+</p>
+
+{% include "runs/_filters.html" %}
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th class="num">Distance</th>
+        <th class="num">Time</th>
+        <th class="num">Pace</th>
+        <th>Run type</th>
+        <th>Effort type</th>
+        <th>Intervals</th>
+        <th class="num">Splits</th>
+        <th>Note</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="day">{{ row.day | period }}</td>
+        <td class="num">{{ row.distance_km | km }}</td>
+        <td class="num">{{ row.duration_s | duration }}</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+        <td>{{ row.run_type }}</td>
+        <td>{{ row.effort_type }}</td>
+        <td class="small">
+          {%- if row.interval_type %}{{ row | intervals }}
+          {%- elif row.run_type == 'Intervals' %}<span class="tag flagged"
+            title="Flagged as intervals, but the detail has not been entered">to add</span>
+          {%- endif -%}
+        </td>
+        <td class="num">{{ row.breakdowns or '' }}</td>
+        <td class="muted small">{{ row.note or '' }}</td>
+        <td><a class="button small" href="{{ url_for('runs.detail', run_id=row.id) }}">Open</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="muted">Nothing matches the filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="caption">
+  <em>Splits</em> is how many rungs of the breakdown ladder the run reached.
+  Pace is worked out from the distance and the time rather than stored, so the
+  three columns cannot disagree.
+</p>
+
+<p class="actions" style="margin-top:.8rem">
+  {% if page > 1 %}
+  <a class="button" href="{{ url_for('runs.data', page=page - 1, **links) }}">← Newer</a>
+  {% endif %}
+  <span class="muted small">Page {{ page }}</span>
+  {% if has_next %}
+  <a class="button" href="{{ url_for('runs.data', page=page + 1, **links) }}">Older →</a>
+  {% endif %}
+  <a class="button primary" href="{{ url_for('runs.input_page') }}">Log a run</a>
+</p>
+{% endblock %}

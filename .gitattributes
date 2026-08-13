@@ -1,0 +1,16 @@
+# Everything in this repo ends up on a Linux NAS, so check out LF regardless of
+# the platform. Without this, Git's autocrlf on Windows rewrites the shell
+# scripts with CRLF, and DSM's /bin/sh then fails on them with a misleading
+# "not found" error.
+* text=auto eol=lf
+
+# Belt and braces for the files where it actually breaks things.
+*.sh  text eol=lf
+*.py  text eol=lf
+*.sql text eol=lf
+
+# Never touch these.
+*.db    binary
+*.xlsm  binary
+*.xlsx  binary
+*.png   binary

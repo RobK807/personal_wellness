@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Data · Weigh-in Tracker{% endblock %}
+
+{% set period_heading = {'daily': 'Date', 'weekly': 'Week commencing',
+                         'monthly': 'Month'}[grain] %}
+{% set daily = grain == 'daily' %}
+
+{% block content %}
+<h1>Data</h1>
+<p class="caption">
+  {{ coverage.days }} days from {{ coverage.first_day | period }} to
+  {{ coverage.last_day | period }}, of which {{ coverage.estimated_days }}
+  {{ 'is' if coverage.estimated_days == 1 else 'are' }} interpolated.
+  {{ coverage.readings }} real weigh-ins recorded.
+  {% if coverage.missing_days %}
+  <strong>{{ coverage.missing_days }} day{{ '' if coverage.missing_days == 1 else 's' }}
+  still missing</strong> — see Admin.{% endif %}
+</p>
+
+<div class="controls">
+  <div>
+    <p class="legend">Averaged</p>
+    <div class="segmented">
+      {% for name in grains %}
+      <a href="{{ url_for('weigh_in.data', grain=name,
+                          estimated='1' if include_estimated else '0') }}"
+         class="{{ 'on' if name == grain }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% if daily %}
+  <div>
+    <p class="legend">Show</p>
+    <div class="segmented">
+      <a href="{{ url_for('weigh_in.data', grain=grain) }}"
+         class="{{ 'on' if include_estimated }}">Everything</a>
+      <a href="{{ url_for('weigh_in.data', grain=grain, estimated='0') }}"
+         class="{{ 'on' if not include_estimated }}">Real readings only</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>{{ period_heading }}</th>
+        {% for key, label, unit, dp, better in all_metrics %}<th class="num">{{ label }}</th>{% endfor %}
+        {% if daily %}
+        <th class="num">Weigh-ins</th><th></th>
+        {% else %}
+        <th class="num">Days</th><th class="num">Estimated</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr {% if daily and row.estimated %}class="estimated"{% endif %}>
+        <td class="day">{{ row.period | period(grain) }}{% if daily and row.estimated %}
+          <span class="tag est">est</span>{% endif %}</td>
+        {% for key, label, unit, dp, better in all_metrics %}
+        <td class="num">{{ row[key] | metric(key) }}</td>
+        {% endfor %}
+        {% if daily %}
+        <td class="num">{{ row.readings }}</td>
+        <td><a class="button small" href="{{ url_for('weigh_in.input_page', day=row.period) }}">Edit</a></td>
+        {% else %}
+        <td class="num">{{ row.days }}</td>
+        <td class="num">{{ row.estimated_days or '' }}</td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="muted">Nothing here.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="caption">
+  Newest first.
+  {% if daily %}
+  Interpolated days are days that were missed and filled in on a straight line
+  between the readings either side.
+  {% else %}
+  Each row is the average of the days it covers — the same figures the
+  {{ grain }} charts are drawn from. <em>Days</em> is how many were recorded,
+  <em>Estimated</em> how many of those were interpolated, so a
+  {{ 'week' if grain == 'weekly' else 'month' }} leaning heavily on filled-in
+  days is visible rather than hidden inside the average.
+  {% endif %}
+</p>
+
+<p class="actions" style="margin-top:.8rem">
+  {% if page > 1 %}
+  <a class="button" href="{{ url_for('weigh_in.data', grain=grain, page=page - 1,
+                                     estimated='1' if include_estimated else '0') }}">← Newer</a>
+  {% endif %}
+  <span class="muted small">Page {{ page }}</span>
+  {% if has_next %}
+  <a class="button" href="{{ url_for('weigh_in.data', grain=grain, page=page + 1,
+                                     estimated='1' if include_estimated else '0') }}">Older →</a>
+  {% endif %}
+</p>
+{% endblock %}

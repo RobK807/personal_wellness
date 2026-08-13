@@ -1,0 +1,38 @@
+# The database and everything beside it: six years of readings, the session
+# signing key, logs and the pid file. The dashboard is the system of record and
+# the NAS holds the live copy - see deploy/DEPLOY.md for how it is backed up.
+data/
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.pid
+*.log
+*.xlsx
+deploy/.env
+deploy/password.txt
+
+# The two source workbooks, and the .xlsx snapshots the Admin page writes. Kept
+# out for the same reason as the database: years of personal readings rather
+# than code, and a couple of MB of binary.
+#
+# To carry a historical source in the repo after all, both the `*.xlsx` line
+# above and the relevant line below have to go - the first would otherwise
+# still catch it. Nothing else needs changing; the importers read them where
+# they sit.
+Weigh-in Tracker.xlsx
+strava_webscrape/strava_runs.xlsx
+strava_webscrape/~$*.xlsx
+strava_webscrape/*.csv
+
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Machine-local tool settings. .claude/launch.json is shared deliberately.
+.claude/settings.local.json
+
+# PyCharm's per-machine project state. Nothing in it describes the project in a
+# way another machine would want.
+.idea/

@@ -1,0 +1,20 @@
+# Development on a desktop, and the Streamlit front-end.
+#
+# For the NAS, install requirements-nas.txt instead - Streamlit's stack measures
+# ~172 MB resident and the DS218play has ~76 MB free once the CD dashboard is
+# running. See README.md.
+#
+# Includes the Flask dependencies too, so both front-ends can be run and tested
+# from one environment here.
+
+streamlit>=1.40
+pandas>=2.2
+numpy>=1.26
+altair>=5.3
+openpyxl>=3.1
+
+Flask>=3.0,<4
+waitress>=3.0,<4
+
+# render_docs.py only - not needed to run either front-end.
+Markdown>=3.5

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Run tracker{% endblock %}
+
+{% block content %}
+<h1>No runs yet</h1>
+<p class="caption">The run tracker is built from the scraped Strava workbook.
+  Import it once and the history comes across; everything after that can be
+  entered through the form.</p>
+
+<div class="card">
+  <h3>Bring the history across</h3>
+  <pre>python -m core.strava_import --rebuild</pre>
+  <dl class="facts">
+    <dt>Workbook</dt><dd>{{ workbook }}</dd>
+    <dt>Tab</dt><dd>{{ sheet }}</dd>
+  </dl>
+  <p class="small muted">The importer needs a desktop — openpyxl opening the
+    workbook needs more memory than the NAS has free. Everything else runs
+    anywhere.</p>
+</div>
+
+<p class="actions">
+  <a class="button primary" href="{{ url_for('runs.input_page') }}">Log a run instead</a>
+</p>
+{% endblock %}

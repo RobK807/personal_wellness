@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Overview · Weigh-in Tracker{% endblock %}
+
+{% block content %}
+{% set latest = head.latest %}
+<h1>Overview</h1>
+<p class="caption">
+  Latest reading {{ latest.period | period }}{% if latest.estimated_days %}
+  <span class="tag est">interpolated</span>{% endif %} ·
+  {{ head.coverage.days }} days recorded since
+  {{ head.coverage.first_day | period }}{% if head.coverage.estimated_days %},
+  {{ head.coverage.estimated_days }} of them interpolated{% endif %}.
+</p>
+
+<div class="metrics">
+  {% for key, label, unit, dp, better in all_metrics %}
+  <div class="metric">
+    <span class="label">{{ label }}</span>
+    <span class="value">{{ latest[key] | metric_unit(key) }}</span>
+    {% if sparklines[key] %}<span class="spark">{{ sparklines[key] | safe }}</span>{% endif %}
+    <span class="deltas">
+      {% for window in ['day', 'week', '4 weeks'] %}
+        {% set change = head.changes[window] %}
+        {% if change %}
+        <span class="delta {{ change[key] | direction(key) }}"
+              title="Change over the last {{ window }}">
+          {{ change[key] | change(key) }}<span class="muted">/{{ window[:1] if window != '4 weeks' else '4w' }}</span>
+        </span>
+        {% endif %}
+      {% endfor %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>How it has moved</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Over</th>
+        {% for key, label, unit, dp, better in all_metrics %}<th class="num">{{ label }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for window, change in head.changes.items() %}
+      <tr>
+        <td>{{ window }}</td>
+        {% for key, label, unit, dp, better in all_metrics %}
+          {% if change %}
+          <td class="num delta {{ change[key] | direction(key) }}">{{ change[key] | change(key) }}</td>
+          {% else %}
+          <td class="num muted">-</td>
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">Compared like for like: a day, seven days and twenty-eight
+  days back from the latest reading, then the whole history.</p>
+
+<h2>Last 90 days</h2>
+{% for key_a, key_b, svg in pair_charts %}
+<div class="card">
+  <h3>{{ labels[key_a] }} and {{ labels[key_b] }}</h3>
+  {{ svg | safe }}
+</div>
+{% endfor %}
+
+<p class="actions">
+  <a class="button primary" href="{{ url_for('weigh_in.input_page') }}">Enter today's weigh-in</a>
+  <a class="button" href="{{ url_for('weigh_in.trends') }}">All charts</a>
+  <a class="button" href="{{ url_for('weigh_in.changes') }}">Changes</a>
+</p>
+{% endblock %}

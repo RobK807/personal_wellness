@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Records · Run tracker{% endblock %}
+
+{% block content %}
+<h1>Records</h1>
+<p class="caption">
+  The fastest {{ top }} at each of the distances the spreadsheet's
+  <em>Breakdown</em> column tracks. A single run appears in as many tables as it
+  reached rungs — a half-marathon holds a fastest 400m as well as a fastest
+  20K — and never twice in the same one. A time that has been matched but not
+  beaten keeps its place.
+</p>
+
+{% set hidden = {'top': top, 'flagged': '1' if include_suspect else ''} %}
+{% include "runs/_filters.html" %}
+
+<div class="controls">
+  <div>
+    <p class="legend">Show</p>
+    <div class="segmented">
+      {% for n in [3, 5, 10, 25] %}
+      <a href="{{ url_for('runs.records', top=n, flagged='1' if include_suspect else none, **links) }}"
+         class="{{ 'on' if n == top }}">Top {{ n }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% if suspect_count %}
+  <div>
+    <p class="legend">Flagged splits</p>
+    <div class="segmented">
+      <a href="{{ url_for('runs.records', top=top, **links) }}"
+         class="{{ 'on' if not include_suspect }}">Excluded</a>
+      <a href="{{ url_for('runs.records', top=top, flagged='1', **links) }}"
+         class="{{ 'on' if include_suspect }}">Included</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% if suspect_count and not include_suspect %}
+<p class="flash flash-warn">
+  {{ suspect_count }} split{{ '' if suspect_count == 1 else 's' }} from the
+  source sheet contradict{{ 's' if suspect_count == 1 else '' }} the run
+  {{ 'it' if suspect_count == 1 else 'they' }} came from — longer than the whole
+  run, or quicker than a shorter split inside it — so
+  {{ 'it is' if suspect_count == 1 else 'they are' }} left out of these tables.
+  <a href="{{ url_for('runs.admin') }}">See what and why</a>.
+</p>
+{% endif %}
+
+<div class="records">
+  {% for label, rows in tables.items() %}
+  <div class="card">
+    <h3>
+      <span>{{ label }}</span>
+      <span class="rung-km">{{ '%.3f'|format(breakdown_km[label])|float }} km</span>
+    </h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th></th><th class="num">Time</th><th class="num">Pace</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr {% if row.suspect %}class="flagged"{% endif %}>
+            <td class="position {{ 'first' if row.position == 1 }}">{{ row.position | ordinal }}</td>
+            <td class="num">{{ row.seconds | duration }}</td>
+            <td class="num">{{ row.pace_s | pace }}</td>
+            <td class="day">
+              <a href="{{ url_for('runs.detail', run_id=row.run_id) }}"
+                 title="{{ row.distance_km | km }} km {{ row.run_type }} run, {{ row.effort_type }}">
+                {{ row.day | period }}</a>
+              {% if row.suspect %}<span class="tag flagged">flagged</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted" style="margin:.6rem 0 0">
+      {{ rows[0].run_type }} · {{ rows[0].effort_type }} holds the fastest.
+    </p>
+  </div>
+  {% else %}
+  <p class="muted">No runs match the filters, so there is nothing to rank.</p>
+  {% endfor %}
+</div>
+{% endblock %}

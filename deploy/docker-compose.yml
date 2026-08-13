@@ -1,0 +1,23 @@
+# Kept for reference only - the NAS cannot run containers. See DEPLOY.md.
+services:
+  weigh-in-tracker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: weigh-in-tracker
+    restart: unless-stopped
+    ports:
+      # Tailscale reaches the NAS on its Tailscale interface, not loopback, so
+      # this needs to listen on all interfaces. 8501 is the CD dashboard.
+      - "8503:8503"
+    volumes:
+      # Persistent database + exports. Adjust the host path to your NAS layout.
+      - /volume1/docker/weigh-in-tracker/data:/data
+      # The original workbook, read-only, so the importer can still reach it.
+      - /volume1/Rob_Documents/Private/Other/Health:/workbook:ro
+    environment:
+      PW_DB_PATH: /data/wellness.db
+      PW_EXPORT_DIR: /data/exports
+      PW_SOURCE_XLSX: /workbook/Weigh-in Tracker.xlsx
+      # Set this in a .env file next to this compose file, do not commit it.
+      PW_APP_PASSWORD: ${PW_APP_PASSWORD}

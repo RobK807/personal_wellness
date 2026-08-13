@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Overview · Run tracker{% endblock %}
+
+{% block content %}
+<h1>Overview</h1>
+<p class="caption">
+  {{ coverage.runs }} runs from {{ coverage.first_day | period }} to
+  {{ coverage.last_day | period }} —
+  {{ coverage.distance_km | km(0) }} km in
+  {{ coverage.duration_s | duration(true) }}, with
+  {{ coverage.splits }} best efforts recorded inside them{% if coverage.without_splits %}
+  ({{ coverage.without_splits }} run{{ '' if coverage.without_splits == 1 else 's' }}
+  came across without any){% endif %}.
+</p>
+
+{% include "runs/_filters.html" %}
+
+<div class="metrics">
+  <div class="metric">
+    <span class="label">Runs</span>
+    <span class="value">{{ totals.runs }}</span>
+  </div>
+  <div class="metric">
+    <span class="label">Distance</span>
+    <span class="value">{{ totals.distance_km | km(0) }}<span class="unit"> km</span></span>
+  </div>
+  <div class="metric">
+    <span class="label">Time</span>
+    <span class="value">{{ totals.duration_s | duration(true) }}</span>
+  </div>
+  <div class="metric">
+    <span class="label">Average pace</span>
+    <span class="value">{{ totals.pace_s | pace }}<span class="unit"> /km</span></span>
+    <span class="deltas"><span class="muted small">quickest run
+      {{ totals.best_pace_s | pace(true) }}</span></span>
+  </div>
+</div>
+<p class="caption" style="margin-top:.6rem">These four cover the filtered
+  window{% if chosen.span != 'All' %} — {{ totals.first_day | period }} onwards{% endif %}{%
+  if chosen.run_type %}, {{ chosen.run_type | lower }} runs only{% endif %}{%
+  if chosen.effort_type %}, {{ chosen.effort_type | lower }} effort only{% endif %}.
+  The line above the filters is everything.</p>
+
+{% if last %}
+<h2>Last run</h2>
+<div class="card">
+  <h3>
+    <a href="{{ url_for('runs.detail', run_id=last.id) }}">{{ last.day | period }}</a>
+    <span class="muted small">{{ last.run_type }} · {{ last.effort_type }}</span>
+  </h3>
+  <p class="mono-num">
+    {{ last.distance_km | km }} km in {{ last.duration_s | duration }}
+    ({{ last.pace_s | pace(true) }})
+  </p>
+  {% if last_bests %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Best effort</th><th class="num">Time</th><th class="num">Pace</th></tr>
+      </thead>
+      <tbody>
+        {% for best in last_bests %}
+        <tr {% if best.suspect %}class="flagged"{% endif %}>
+          <td>{{ best.breakdown }}{% if best.suspect %}
+            <span class="tag flagged" title="Contradicts the run it came from — see Admin">flagged</span>{% endif %}</td>
+          <td class="num">{{ best.seconds | duration }}</td>
+          <td class="num">{{ best.pace_s | pace }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted small">No best efforts recorded for this run.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>Volume</h2>
+<div class="card">
+  <h3>Kilometres per month</h3>
+  {{ volume_chart | safe }}
+</div>
+
+<h2>Pace</h2>
+<div class="card">
+  <h3>Average pace per month</h3>
+  {{ pace_chart | safe }}
+  <p class="caption" style="margin-top:.6rem">The axis is inverted: quicker is
+    higher. Each point is the month's total time over its total distance, so a
+    long slow run counts for more than a short one.</p>
+</div>
+
+<h2>Personal bests</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Distance</th><th class="num">Time</th><th class="num">Pace</th>
+        <th>When</th><th>In</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for best in bests %}
+      <tr>
+        <td>{{ best.breakdown }}</td>
+        <td class="num">{{ best.seconds | duration }}</td>
+        <td class="num">{{ best.pace_s | pace }}</td>
+        <td class="day">{{ best.day | period }}</td>
+        <td><a href="{{ url_for('runs.detail', run_id=best.run_id) }}">a
+          {{ best.distance_km | km }} km {{ best.run_type | lower }} run</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">Nothing recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">The single fastest at each distance, across everything rather
+  than the filtered range. The
+  <a href="{{ url_for('runs.records') }}">Records page</a> has the top five.</p>
+
+<h2>Recent runs</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th class="num">Distance</th><th class="num">Time</th>
+        <th class="num">Pace</th><th>Type</th><th>Effort</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td class="day">{{ row.day | period }}</td>
+        <td class="num">{{ row.distance_km | km }}</td>
+        <td class="num">{{ row.duration_s | duration }}</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+        <td>{{ row.run_type }}</td>
+        <td>{{ row.effort_type }}</td>
+        <td><a class="button small" href="{{ url_for('runs.detail', run_id=row.id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="actions">
+  <a class="button primary" href="{{ url_for('runs.input_page') }}">Log a run</a>
+  <a class="button" href="{{ url_for('runs.analysis') }}">Analysis</a>
+  <a class="button" href="{{ url_for('runs.records') }}">Records</a>
+</p>
+{% endblock %}

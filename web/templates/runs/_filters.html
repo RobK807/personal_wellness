@@ -1,0 +1,53 @@
+{# The filter bar shared by the run pages.
+
+   A GET form rather than a row of links: three independent choices produce a
+   dozen combinations, and links would need every page to build every one of
+   them. Submitted with a button rather than on change, because a <select> that
+   navigates as you arrow through it cannot be used with a keyboard.
+
+   `hidden` lets a page keep its own state - the analysis page's grain, the
+   records page's depth - across a filter change. #}
+<form class="filters" method="get" action="{{ url_for(current) }}">
+  {% for name, value in (hidden or {}).items() %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+
+  <div class="field">
+    <label for="f-range">Since</label>
+    <select id="f-range" name="range">
+      {% for label, days in ranges %}
+      <option value="{{ label }}" {{ 'selected' if label == chosen.span }}>
+        {{ {'90d': 'Last 90 days', '6m': 'Last 6 months', '1y': 'Last year',
+            '2y': 'Last 2 years', 'All': 'Everything'}.get(label, label) }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="f-run-type">Run type</label>
+    <select id="f-run-type" name="run_type">
+      <option value="">Every run type</option>
+      {% for value in run_types %}
+      <option value="{{ value }}" {{ 'selected' if value == chosen.run_type }}>{{ value }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="f-effort-type">Effort type</label>
+    <select id="f-effort-type" name="effort_type">
+      <option value="">Every effort type</option>
+      {% for value in effort_types %}
+      <option value="{{ value }}" {{ 'selected' if value == chosen.effort_type }}>{{ value }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="actions">
+    <button class="primary" type="submit">Apply</button>
+    {% if chosen.run_type or chosen.effort_type or chosen.span != 'All' %}
+    <a class="button small" href="{{ url_for(current, range='All') }}">Clear</a>
+    {% endif %}
+  </div>
+</form>

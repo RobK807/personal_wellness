@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Personal Wellness</title>
+<style>
+:root {
+  --bg:#f7f9f9; --surface:#fff; --border:#dde4e4; --text:#17201f;
+  --muted:#62706e; --accent:#1f6f6b; --code-bg:#eef3f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#121817; --surface:#1a2221; --border:#2c3736; --text:#e6eceb;
+    --muted:#93a3a1; --accent:#5cc4bb; --code-bg:#1f2a29;
+  }
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; padding:2rem 1.25rem 5rem; background:var(--bg); color:var(--text);
+  font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+main { max-width:52rem; margin:0 auto; }
+h1,h2,h3,h4 { line-height:1.25; margin:2rem 0 .6rem; }
+h1 { font-size:1.9rem; margin-top:0; }
+h2 { font-size:1.35rem; padding-bottom:.3rem; border-bottom:1px solid var(--border); }
+h3 { font-size:1.1rem; }
+p,ul,ol { margin:0 0 1rem; }
+li { margin:.25rem 0; }
+a { color:var(--accent); }
+hr { border:0; border-top:1px solid var(--border); margin:2.5rem 0; }
+strong { font-weight:650; }
+blockquote {
+  margin:0 0 1rem; padding:.5rem 1rem; border-left:3px solid var(--accent);
+  background:var(--surface); color:var(--muted);
+}
+code {
+  font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:.88em;
+  background:var(--code-bg); padding:.12em .35em; border-radius:4px;
+}
+pre {
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  padding:.9rem 1rem; overflow-x:auto; margin:0 0 1rem;
+}
+pre code { background:none; padding:0; font-size:.85rem; }
+.table-wrap { overflow-x:auto; margin:0 0 1.25rem; }
+table { border-collapse:collapse; width:100%; font-size:.92rem;
+        background:var(--surface); border:1px solid var(--border);
+        border-radius:8px; overflow:hidden; }
+th,td { padding:.5rem .7rem; text-align:left; border-bottom:1px solid var(--border);
+        vertical-align:top; }
+th { font-size:.76rem; text-transform:uppercase; letter-spacing:.04em;
+     color:var(--muted); font-weight:600; }
+tbody tr:last-child td { border-bottom:0; }
+footer { max-width:52rem; margin:3rem auto 0; padding-top:1rem;
+         border-top:1px solid var(--border); color:var(--muted); font-size:.82rem; }
+</style>
+</head>
+<body>
+<main>
+<h1 id="personal-wellness">Personal Wellness</h1>
+<p>Four trackers behind one sidebar, on one database, with two front-ends over the
+top. The <strong>weigh-in tracker</strong> is the standalone app of the same name, moved in
+whole; the <strong>run tracker</strong> is new, built from seven years of runs scraped off
+Strava; the <strong>workout plan</strong> and the <strong>diet tracker</strong> are placeholders with
+nothing behind them yet, and say so.</p>
+<p>Built the same way as the CD dashboard next door: one shared <code>core</code> package, a
+<strong>Flask</strong> front-end light enough to run on the NAS, and a <strong>Streamlit</strong> one for
+a machine with memory to spare.</p>
+<pre><code class="language-bash">pip install -r requirements.txt
+python -m core.excel_import --rebuild     # the weigh-in history, once
+python -m core.strava_import --rebuild    # the runs, once
+python serve.py                           # Flask, http://localhost:8503
+streamlit run app.py                      # Streamlit, same data
+</code></pre>
+<p>Both importers need a desktop — openpyxl opening a 1.5 MB workbook needs far
+more memory than the NAS has free. Everything else runs anywhere.</p>
+<hr>
+<h2 id="the-sections">The sections</h2>
+<p>The sidebar picks the tracker; the tab strip picks the page inside it. Both
+front-ends read that from <code>config.SECTIONS</code>, so adding the fourth tracker means
+adding a blueprint, a views subpackage and one line — not editing two
+navigations that can drift apart.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>⚖️ <strong>Weigh-in tracker</strong></td>
+<td>Six years of weigh-ins, unchanged. <a href="#the-weigh-in-tracker">What it does</a></td>
+</tr>
+<tr>
+<td>🏃 <strong>Run tracker</strong></td>
+<td>229 runs, 1,542 best efforts. <a href="#the-run-tracker">What it does</a></td>
+</tr>
+<tr>
+<td>🏋️ <strong>Workout plan</strong></td>
+<td>Placeholder. <a href="#the-two-that-are-not-built">Why there is no schema yet</a></td>
+</tr>
+<tr>
+<td>🥗 <strong>Diet tracker</strong></td>
+<td>Placeholder. Same.</td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h2 id="the-weigh-in-tracker">The weigh-in tracker</h2>
+<p>Moved across as it was designed, and it still reconciles with the workbook.</p>
+<p><strong>Input.</strong> Weight, BMI, body fat %, skeletal muscle %, RM Kcal and visceral
+fat, twice a day, for any date. The first four are entered to one decimal place
+and the last two as whole numbers, because that is what the scale reports;
+anything finer is rounded on the way in and anything wild is refused outright —
+715 typed for 71.5 does not get saved.</p>
+<p><strong>Averaging.</strong> The two weigh-ins are averaged into the day's figures, and
+everything downstream is built on that average. If only one weigh-in was taken,
+the average is that one reading rather than half of it.</p>
+<p><strong>Derived masses.</strong> Body fat and skeletal muscle in kilograms, from the
+averaged weight and the averaged percentage — the workbook's <code>Data!T</code> and
+<code>Data!U</code>.</p>
+<p><strong>Back-filling missed days.</strong> Miss a Tuesday and a Wednesday, and entering
+Thursday's weigh-in fills both of them in on a straight line between Monday and
+Thursday. This is the Adjustments sheet, done automatically and for any length
+of gap. See <a href="#how-back-filling-works">How back-filling works</a>.</p>
+<p><strong>Charts.</strong> Every metric on its own, plus the four paired charts from the
+workbook — weight against BMI, body fat against skeletal muscle, RM Kcal
+against visceral fat, weight against body fat — each pair on two independent
+y-axes. Any range, averaged daily, weekly or monthly. Hovering — or dragging a
+finger — gives a crosshair and the values for that date; see
+<a href="#reading-values-off-the-chart">Reading values off the chart</a>.</p>
+<p><strong>Changes.</strong> Day on day, week on week, month on month, the rolling seven-day
+change, and the weekly average of that rolling change. The last three are the
+workbook's three change sheets; the first two are new.</p>
+<p><strong>Data.</strong> The figures as a table, daily, weekly or monthly, reading from the
+same views the charts are drawn from so the two can never disagree about the
+same week. Weekly and monthly rows carry a <strong>Days</strong> and an <strong>Estimated</strong> count,
+so a period leaning heavily on interpolated days is visible rather than hidden
+inside its average — which is how you find out that 31/05/2024 to 06/07/2024 is
+a 37-day straight line rather than five weeks of weigh-ins.</p>
+<h3 id="does-it-agree-with-the-spreadsheet">Does it agree with the spreadsheet?</h3>
+<p>Yes, and there is a test that proves it:</p>
+<pre><code class="language-bash">python reconcile_test.py
+</code></pre>
+<p>It recomputes every derived series from the database and compares it against
+the cached values in the corresponding sheet — 13,638 daily figures, 1,944
+weekly, 456 monthly, plus the three change sheets and the derived masses.</p>
+<p>It also found four things wrong with the workbook. None of them is dramatic,
+but two are worth knowing about:</p>
+<ol>
+<li>
+<p><strong>The Summary sheet silently drops three days.</strong> Column A is <code>=Data!A3</code>
+   filled down, and at row 818 the references slipped by one and never
+   recovered — twice more after that. <strong>09/08/2022, 29/01/2023 and 04/09/2025
+   were recorded and then left out</strong> of every average built on Summary: the
+   monthly figures and all three change sheets. The dashboard includes them, so
+   those periods legitimately disagree with the sheet.</p>
+</li>
+<li>
+<p><strong>The rolling weekly change is a row offset, not a date offset.</strong> The sheet
+   computes <code>Summary!B10 - Summary!B3</code> — seven <em>rows</em> apart, which is seven days
+   only while Summary has one row per day. After the first dropped day it is
+   quietly comparing eight. The dashboard joins on the date.</p>
+</li>
+<li>
+<p><strong>The current part-week average is divided by seven regardless.</strong> Weekly
+   Results averages a fixed seven-cell window, and the cells below the last
+   reading hold formulas evaluating to <code>0</code> rather than being empty, so <code>AVERAGE</code>
+   counts them. The part-week at the end reads about 6/7 of the truth.</p>
+</li>
+<li>
+<p>Monthly rows exist for months that have not happened yet. Harmless.</p>
+</li>
+</ol>
+<p>The test asserts each of these rather than tolerating them: if one ever stops
+being true, it fails and says so.</p>
+<hr>
+<h2 id="the-run-tracker">The run tracker</h2>
+<p>228 runs between 01/09/2019 and 11/08/2026 — 2,383 km — scraped off Strava into
+<code>strava_webscrape/strava_runs.xlsx</code> and imported from its <code>Final_data</code> tab.</p>
+<h3 id="what-the-sheet-is-and-what-it-becomes">What the sheet is, and what it becomes</h3>
+<p><code>Final_data</code> is one row per (run, breakdown): a run that reached nine rungs of
+Strava's best-effort ladder is nine rows repeating the same date, distance,
+time, pace, run type and effort type. That is a join flattened for a
+spreadsheet, and the importer folds it back into two tables — <code>runs</code> for what
+the run was, <code>run_bests</code> for the ladder inside it. 1,546 rows become 228 runs
+and 1,542 best efforts.</p>
+<p><code>Final_data</code> has no activity id, so a run is identified by its date, distance
+and elapsed time. That is enough: the dates carrying more than one run — three
+of them on 07/06/2026 — separate cleanly, and re-importing updates rather than
+duplicates.</p>
+<p>Two things in the tab are read defensively rather than trusted. The oldest 51
+rows have lost their date and time <strong>number formats</strong>, so they arrive as bare
+Excel serials; the values are intact and the importer converts them rather than
+refusing, because losing a format is not losing a value. And one run's type and
+effort come through as <code>#N/A</code> — <code>Clean_data</code> looks both up with <code>OFFSET</code>/<code>MATCH</code>
+over a fixed range and that run's id falls outside it — which is imported as
+<em>Unclassified</em> rather than as a category called <code>#N/A</code>. Both are counted in the
+import summary so they get fixed at source.</p>
+<p><strong>Neither pace column is imported.</strong> Both are quotients of columns that are, and
+importing a derived value is how a database ends up disagreeing with itself —
+which is exactly what has happened in the sheet: <code>Final_data</code>'s Pace column is a
+pasted value, and correcting sixteen runs' times left all sixteen paces reading
+the old figure. The dashboard is unaffected, and <code>run_test.py</code> says so until
+they are re-pasted.</p>
+<p>The breakdown pace is Strava's own figure, taken from a time it knows to better
+than a second where the sheet kept only the whole second, so 100 of the 1,542
+differ from a derived one by exactly one second. Deriving it is still right,
+because a run entered by hand has no Strava figure to copy.</p>
+<h3 id="input">Input</h3>
+<p>The spreadsheet's fields, minus the two it worked out for itself: date,
+distance, time, run type, effort type, an optional name, and a breakdown time
+against each rung the run was long enough to reach. Times are <code>mm:ss</code> or
+<code>h:mm:ss</code>. Everything is stored as whole seconds, because an Excel time-of-day
+sorts fine right up to the point where a run passes 24 hours or you want to
+average two of them.</p>
+<p>Four things are refused outright, and each one is refused because it would make
+the records table lie: a rung longer than the run, a split longer than the whole
+run, a split quicker than a shorter split inside the same run, and a date in
+the future. Entering a run that already exists corrects it rather than
+duplicating it.</p>
+<h3 id="interval-sessions">Interval sessions</h3>
+<p>A run flagged <strong>Intervals</strong> can carry the shape of the session as well as the
+run: how it was set, how many reps, how long each was and the average split.
+Four nullable columns on <code>runs</code>, so every run recorded before this existed
+simply reads blank.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>column</th>
+<th><code>8 x 1k @ 3:50</code></th>
+<th><code>6 x 3min @ 783m</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interval_type</code></td>
+<td><code>distance</code></td>
+<td><code>time</code></td>
+</tr>
+<tr>
+<td><code>interval_count</code></td>
+<td>8</td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>interval_distance_m</code></td>
+<td>1000 <em>(the target)</em></td>
+<td>783 <em>(what happened)</em></td>
+</tr>
+<tr>
+<td><code>interval_split_s</code></td>
+<td>3:50 <em>(what happened)</em></td>
+<td>3:00 <em>(the target)</em></td>
+</tr>
+</tbody>
+</table></div>
+<p><code>interval_type</code> is what says which of the middle two was prescribed and which
+was the outcome. Both are kept either way, which is what makes the <strong>average
+split</strong> and the <strong>average pace</strong> both available for both kinds of session — the
+pace being <code>split ÷ distance</code>, derived in <code>v_runs</code> rather than stored, so it
+cannot drift from the two columns it comes from. For 1k reps the two are the
+same number; for 400m reps they are 1:32 and 3:50, which is the case the shape
+had to get right.</p>
+<p>Distances are typed as <code>400m</code>, <code>1k</code> or <code>1.6km</code>, because that is how the
+sessions are named. The form refuses a length with no type (there would be no
+telling whether it was metres or minutes) and a session whose reps add up to
+more than the run they sit inside.</p>
+<p>The Log page lists the runs the spreadsheet called intervals that have no
+detail yet, with each one's best 400m and best 1K beside it as a prompt — a
+session of 1k reps usually has a best 1K close to its average split. The list
+empties itself as they are filled in.</p>
+<p>None of this is in the spreadsheet, so <strong><code>--rebuild</code> preserves it</strong>: the
+importer keeps the interval columns against each run's identity and puts them
+back after reloading. A run whose date, distance or time has since changed in
+the sheet cannot be matched, and the import says so rather than dropping it
+quietly.</p>
+<h3 id="analysis">Analysis</h3>
+<p>Split by <strong>run type</strong> (Standard, Race, Weighted, Pace, Sprints, Intervals) and
+by <strong>effort type</strong> (Base, Threshold, Tempo, VO2 max, Race, Warm-up), with a
+grid of the two crossed, a scatter of every run — how far against how fast — and
+volume and pace over time.</p>
+<p><strong>Pace across a group is its total time over its total distance, not the mean of
+each run's pace.</strong> A 20 km plod and a 2 km sprint should not count equally
+towards how fast the running was.</p>
+<p><strong>Every pace axis is inverted, so faster is higher.</strong> Drawn the usual way round,
+a pace chart reads exactly backwards: the line falls as you get quicker.</p>
+<p>There is also a per-distance table — the best, average and slowest at each rung
+of the ladder. <em>5K</em> there is not a 5K race: it is the fastest 5K found inside
+each run of at least 5 km, which is why the count falls away as the distances
+grow (225 runs reach 400m, eleven reach the half-marathon).</p>
+<h3 id="records">Records</h3>
+<p>The top five at each of the eleven breakdown distances. A single run appears in
+as many tables as it reached rungs — a half-marathon holds a fastest 400m as
+well as a fastest 20K — and never twice in the same one, because <code>run_bests</code> is
+keyed on <code>(run_id, breakdown)</code>. A time that has been matched but not beaten
+keeps its place.</p>
+<p>The page opens on everything rather than the last year, because a personal best
+that expires after twelve months is not what the word means. The range and type
+filters narrow it — <em>the fastest 5K inside a weighted run</em> is a fair question.</p>
+<h3 id="splits-that-cannot-be-true">Splits that cannot be true</h3>
+<p>A best effort can be impossible in two ways: <strong>longer than the whole run it sits
+inside</strong>, or <strong>quicker than a shorter split of the same run</strong>. Both are checked,
+by <code>v_run_bests.suspect</code>, and <strong>both are currently zero</strong>.</p>
+<p>They were not always. The scrape produced eighteen of the first kind and one of
+the second, and both were corrected at source in August 2026 — the second by
+putting a mangled half-marathon time right, the first by correcting the runs'
+elapsed times, which moved 16 runs and added 2:43 to the recorded total.</p>
+<p>The rules stay. They are what the input form enforces on anything entered by
+hand, and a refreshed scrape that reintroduces one should surface on the Admin
+page rather than at the top of a records table. Anything they do catch is
+<strong>imported as it stands</strong> — the run happened, and quietly dropping rows would
+leave the dashboard holding less than the sheet it was built from — and then
+<strong>held out of the records and the per-distance averages</strong>, because a table of
+bests should only contain times that could have happened. The Records page has
+a toggle that puts them back if you want to look.</p>
+<p>One thing is reported but not flagged: <strong>49 best efforts are slower than their
+own run's average pace.</strong> That is odd, but unlike the two rules above it is not
+strictly impossible — the fastest 5 km inside a 5.4 km run really can be slower
+than the whole thing, if the last 400 m was quick. 42 of the 49 are on runs less
+than twice the split distance, which is where that argument applies.</p>
+<p>One that has been fixed: eleven breakdown <em>paces</em> were truncated in the sheet.
+<code>strava_runs!Q</code> and <code>!U</code> took a fixed four characters out of Strava's
+<code>5:16/km</code>, one short of what <code>12:35/km</code> needs, so every pace of ten minutes or
+more lost its last digit. They now cut at the <code>/</code>:</p>
+<pre><code>=IFERROR(LEFT(I2,SEARCH(&quot;/&quot;,I2)-1),&quot;&quot;)
+</code></pre>
+<p>The dashboard never read that column — it derives pace from the split and the
+distance — so nothing about the data changed, but the sheet is right now and
+<code>run_test.py</code> keeps it that way.</p>
+<pre><code class="language-bash">python run_test.py
+</code></pre>
+<hr>
+<h2 id="the-two-that-are-not-built">The two that are not built</h2>
+<p>There are no workout or diet tables in <code>core/schema.sql</code>, deliberately. Guessing
+at a schema for a tracker that has not been designed is expensive to undo once
+there is data in it, and the run tracker shows what designed looks like — a
+ladder of best efforts is a very particular shape, and it came from knowing what
+the sheet held.</p>
+<p>Each placeholder page lists what has to be decided first, and the order things
+get built in. The sections already exist in <code>config.SECTIONS</code>, so both
+front-ends already have the sidebar entry.</p>
+<hr>
+<h2 id="how-back-filling-works">How back-filling works</h2>
+<p>The Adjustments sheet was a scratch pad: you pasted the reading before the gap
+above and the reading after it below, and it produced the missing days as a
+straight line. For a gap of <code>n</code> days its formula was</p>
+<pre><code>day i of n  =  ROUND(previous + i × (next − previous) / (n + 1), 1)
+</code></pre>
+<p>That is exactly what <code>core/metrics.interpolate()</code> does, with three deliberate
+differences.</p>
+<p><strong>It rounds to each metric's own precision, not to 1dp across the board.</strong> The
+sheet's blanket <code>ROUND(...,1)</code> produced values like 1667.5 kcal and 6.5 visceral
+fat, which no reading could ever be. New back-fills are whole numbers where the
+metric is a whole number. (The sheet's one-day case used a bare <code>AVERAGE</code> with
+no rounding at all, which is why 14% of the imported history carries two
+decimal places.)</p>
+<p><strong>It writes one reading, not two.</strong> The sheet filled both weigh-in columns.
+Interpolating a value and then calling it two independent measurements
+overstates what is known: there is one estimate for that day, and it is flagged
+as such. The daily average — which is all anything downstream uses — is
+identical either way.</p>
+<p><strong>Estimates are derived, not entered.</strong> Every one sits between two real
+readings and is recomputed whenever either of them changes. Enter the weigh-in
+you forgot on Tuesday and Wednesday's estimate is redrawn on the spot; delete a
+day and it reverts to an estimate; correct a run of entries and <strong>Admin →
+Rebuild</strong> recomputes the lot. Real readings are never touched.</p>
+<p><strong>Long gaps are left alone.</strong> Four missed days on a straight line is a
+reasonable estimate; four missed months is not, and inventing 120 rows would
+quietly poison every average built on them. Gaps longer than
+<code>PW_MAX_BACKFILL_DAYS</code> (60 by default) stay gaps, are reported on the Admin
+page, and say so when you save.</p>
+<hr>
+<h2 id="reading-values-off-the-chart">Reading values off the chart</h2>
+<p>Both front-ends give you the numbers on hover. Streamlit gets it from Altair;
+the Flask weigh-in charts do it themselves, in about a hundred lines of
+<code>web/static/chart-hover.js</code>. The run charts use SVG <code>&lt;title&gt;</code> elements instead —
+a bar chart of twelve months does not need a crosshair.</p>
+<p>The NAS's memory is a <strong>server-side</strong> constraint, and a readout runs in the
+browser, so it costs the NAS nothing. What will not fit is a charting <em>library</em>
+— Altair, Plotly and the rest all arrive with a Python stack attached, and
+pandas alone is 85 MB.</p>
+<ul>
+<li>Pointer events rather than mouse events, so a finger works. On a phone the
+  readout follows a drag across the chart; a vertical scroll fires
+  <code>pointercancel</code> instead, so the page still scrolls normally.</li>
+<li>The charts are complete without it. Turn JavaScript off and you keep the
+  lines, both axes, the ticks and the legend, and lose only the readout.</li>
+<li><strong>The readout cannot disagree with the axes.</strong> Values are rounded in Python
+  before they are sent, because JavaScript rounds halves away from zero and
+  Python rounds them to even — averaging two whole numbers produces halves
+  constantly, so 1667.5 kcal would otherwise read one way on the axis and
+  another in the readout. <code>web_test.py</code> checks every value in every chart
+  against <code>core.metrics</code>.</li>
+</ul>
+<p>One thing to know: at <strong>All + daily</strong> the weigh-in charts page is around 1.6 MB,
+because 2,276 points × 12 charts is a lot of coordinates however they are
+encoded. It loads fine over Tailscale but it is not instant, and at four days
+per pixel you cannot point at a specific day anyway — switch the averaging to
+weekly or monthly for multi-year spans, which is what the selector is for. The
+default 90-day view is about 60 KB.</p>
+<hr>
+<h2 id="tests">Tests</h2>
+<pre><code class="language-bash">python reconcile_test.py    # every weigh-in figure against the workbook
+python run_test.py          # every run figure against the Strava sheet
+python smoke_test.py        # the weigh-in write path, especially back-filling
+python web_test.py          # every Flask route, form and both navigations
+python streamlit_test.py    # every Streamlit page, with data and without
+python py39_check.py        # nothing on the NAS path needs Python 3.10
+</code></pre>
+<p><code>web_test.py</code> also asserts that pandas, numpy and Streamlit are <strong>not</strong> imported
+by the Flask front-end. That is not tidiness — pandas alone costs 85 MB, and the
+NAS has around 76 MB free once the CD dashboard is running. Without the check,
+an innocent-looking import would break the deployment silently.</p>
+<p><code>streamlit_test.py</code> renders every page twice, once against the real data and
+once against an empty database, and then runs <code>app.py</code> itself. The last part is
+not redundant: <code>st.Page</code> rejects a nested <code>url_path</code>, and a slug it refuses
+takes down every page at once while each of them passes in isolation.</p>
+<hr>
+<h2 id="how-it-is-put-together">How it is put together</h2>
+<pre><code>config.py               sections, metric definitions, the breakdown ladder, paths
+core/
+  schema.sql            weigh-in tables, run tables, and the views over both
+  db.py                 sqlite3 plumbing, no pandas anywhere near it
+  metrics.py            weigh-ins: precision, validation, interpolation
+  mutations.py          weigh-ins: saving, deleting, back-filling
+  queries.py            weigh-ins: every series and every difference
+  runs.py               runs: durations, paces, the ladder, validation
+  run_mutations.py      runs: saving a run and its splits, atomically
+  run_queries.py        runs: the splits by type, and the records
+  excel_import.py       the weigh-in workbook -&gt; SQLite
+  strava_import.py      Final_data -&gt; SQLite
+  excel_export.py       SQLite -&gt; .xlsx, on demand
+web/                    Flask front-end
+  app.py                the shell: factory, auth, filters, sidebar context
+  nav.py                what the sidebar and the tab strip contain
+  blueprints/           one module per section
+  charts.py             hand-rolled SVG for the weigh-in charts
+  run_charts.py         hand-rolled SVG for the run charts
+  templates/            base.html, then one directory per section
+views/                  Streamlit front-end
+  frames.py             weigh-in queries -&gt; DataFrames
+  run_frames.py         run queries -&gt; DataFrames
+  altair_charts.py      the weigh-in charts
+  run_charts.py         the run charts
+  weigh_in/  runs/      the pages
+  placeholders.py       the two sections that are not built
+deploy/                 NAS scripts, and the container files that are not used
+</code></pre>
+<p><code>core</code> never imports pandas, Streamlit or Altair. Both front-ends sit on top of
+it, so the schema, the averaging, the interpolation and the ranking are shared
+rather than written twice — the only difference is how they draw.</p>
+<h3 id="the-database">The database</h3>
+<p>One file, <code>data/wellness.db</code>. It is the weigh-in tracker's schema with the run
+tables added, so <code>data/weigh_ins.db</code> can simply be renamed and the run tables
+appear alongside on first start.</p>
+<p><strong>Weigh-ins.</strong> <code>readings</code> holds what was entered: one row per weigh-in, keyed on
+<code>(day, slot)</code>, with an <code>estimated</code> flag marking the back-filled ones. <code>v_daily</code>
+averages the slots and derives the two masses. <code>v_weekly</code> and <code>v_monthly</code>
+average that, grouped by ISO week (Monday start, matching the workbook's weeks,
+which ran from Monday 25 May 2020) and by calendar month. Differences are window
+functions over those views, not stored columns.</p>
+<p><code>rm_kcal</code> and <code>visceral_fat</code> are <code>REAL</code> rather than <code>INTEGER</code> even though the
+scale reports them whole. The imported history contains half-values from the
+sheet's own back-fills, and storing what was actually recorded beats silently
+rewriting it; input precision is enforced on the way in instead.</p>
+<p><strong>Runs.</strong> <code>runs</code> holds one row per run, unique on <code>(day, distance_km,
+duration_s)</code>, which is the identity the sheet can offer and what makes
+re-importing safe. <code>run_bests</code> holds the ladder, keyed on <code>(run_id, breakdown)</code>
+and cascading on delete. <code>v_runs</code> works out pace; <code>v_run_bests</code> works out pace
+and flags the splits that contradict the run they came from.</p>
+<p>Pace is never stored anywhere. It is duration over distance, and a stored copy
+is one edit away from disagreeing with the two columns it came from.</p>
+<p>The run views are <code>DROP</code>ped and recreated on every start rather than created
+<code>IF NOT EXISTS</code>. A view is code, not data, and leaving an old definition in
+place because the name already exists is how a database ends up running last
+month's SQL against this month's tables.</p>
+<h3 id="configuration">Configuration</h3>
+<p>Every path is an environment variable, so the same code runs unchanged here and
+on the NAS. The <code>WI_</code> names the weigh-in tracker used are still read as a
+fallback, so a half-migrated NAS does not silently point at the wrong database
+or drop its password gate.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PW_DB_PATH</code></td>
+<td>where the SQLite file lives</td>
+</tr>
+<tr>
+<td><code>PW_SOURCE_XLSX</code></td>
+<td>the weigh-in workbook, read-only, importer only</td>
+</tr>
+<tr>
+<td><code>PW_RUNS_XLSX</code></td>
+<td>the Strava workbook, read-only, importer only</td>
+</tr>
+<tr>
+<td><code>PW_RUNS_SHEET</code></td>
+<td>which tab of it to read — <code>Final_data</code></td>
+</tr>
+<tr>
+<td><code>PW_EXPORT_DIR</code></td>
+<td>where .xlsx snapshots are written</td>
+</tr>
+<tr>
+<td><code>PW_APP_PASSWORD</code></td>
+<td>shared password; unset disables the gate</td>
+</tr>
+<tr>
+<td><code>PW_WEB_PORT</code></td>
+<td>Flask port, 8503 by default</td>
+</tr>
+<tr>
+<td><code>PW_MAX_BACKFILL_DAYS</code></td>
+<td>longest weigh-in gap that gets interpolated, 60 by default</td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h2 id="deploying">Deploying</h2>
+<p>See <a href="deploy/DEPLOY.html">deploy/DEPLOY.md</a>. Short version: it runs on the Synology
+NAS on port 8503 alongside the CD dashboard on 8501, sharing one venv, reachable
+from a phone over Tailscale. The NAS cannot run Streamlit — not enough memory,
+and DSM's Python is too old — which is why the Flask front-end exists.</p>
+<p>It <strong>replaces</strong> the standalone weigh-in tracker on 8502 rather than joining it:
+the weigh-in section here is that app, and running both would be two front doors
+onto two copies of the same six years of readings. DEPLOY.md has the three
+commands.</p>
+</main>
+<footer>Generated from <code>README.md</code> by <code>render_docs.py</code>.
+Re-run it after editing the Markdown.</footer>
+</body>
+</html>

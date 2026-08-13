@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Input · Weigh-in Tracker{% endblock %}
+
+{% macro field(slot, key, label, unit, dp) -%}
+  {% set name = 's' ~ slot ~ '_' ~ key %}
+  {% set saved = existing.get(slot) %}
+  <div class="field">
+    <label for="{{ name }}">{{ label }}{% if unit %} <span class="muted">({{ unit }})</span>{% endif %}</label>
+    <input type="number" id="{{ name }}" name="{{ name }}"
+           step="{{ '1' if dp == 0 else '0.1' }}"
+           inputmode="{{ 'numeric' if dp == 0 else 'decimal' }}"
+           value="{{ (form[name] if form else (saved[key] | metric(key) if saved else '')) or '' }}"
+           {% if previous %}placeholder="{{ previous[key] | metric(key) }}"{% endif %}
+           autocomplete="off">
+  </div>
+{%- endmacro %}
+
+{% block content %}
+<h1>Input</h1>
+<p class="caption">Two weigh-ins a day, averaged. Leave the second blank if you
+  only took one — the average simply uses what is there.
+  {% if previous %}Faded numbers are yesterday's, so a slipped decimal point stands out.{% endif %}
+</p>
+
+<form class="card" method="get">
+  <div class="row two">
+    <div class="field">
+      <label for="day">Date</label>
+      <input type="date" id="day" name="day" value="{{ day.isoformat() }}"
+             max="{{ today.isoformat() }}">
+    </div>
+    <div class="field" style="align-self:end">
+      <button type="submit">Go to this date</button>
+    </div>
+  </div>
+</form>
+
+<form method="post">
+  <input type="hidden" name="day" value="{{ day.isoformat() }}">
+
+  <div class="weigh-ins">
+    {% for slot in [1, 2] %}
+    <div class="weigh-in">
+      <h3>
+        Weigh-in {{ slot }}
+        {% if existing.get(slot) %}
+          <span class="tag{{ ' est' if existing[slot].estimated }}">
+            {{ 'interpolated' if existing[slot].estimated else 'saved' }}</span>
+        {% endif %}
+      </h3>
+      {% for key, label, unit, dp, better in metrics %}
+        {{ field(slot, key, label, unit, dp) }}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="field" style="margin-top:1rem">
+    <label for="note">Note (optional)</label>
+    <input type="text" id="note" name="note" maxlength="200"
+           value="{{ form.note if form else '' }}"
+           placeholder="Ill, travelling, after a big meal…">
+  </div>
+
+  <p class="actions">
+    <button class="primary" type="submit">Save {{ day.strftime('%d/%m/%Y') }}</button>
+    <a class="button" href="{{ url_for('weigh_in.input_page', day=(day - one_day).isoformat()) }}">← Previous day</a>
+    {% if day < today %}
+    <a class="button" href="{{ url_for('weigh_in.input_page', day=(day + one_day).isoformat()) }}">Next day →</a>
+    {% endif %}
+  </p>
+</form>
+
+{% if day_row %}
+<h2>{{ day.strftime('%d/%m/%Y') }} as it stands</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th></th>{% for key, label, unit, dp, better in all_metrics %}<th class="num">{{ label }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for slot in [1, 2] %}
+        {% if existing.get(slot) %}
+        <tr {% if existing[slot].estimated %}class="estimated"{% endif %}>
+          <td>Weigh-in {{ slot }}</td>
+          {% for key, label, unit, dp, better in all_metrics %}
+            <td class="num">{{ existing[slot][key] | metric(key) if key in existing[slot] else '' }}</td>
+          {% endfor %}
+        </tr>
+        {% endif %}
+      {% endfor %}
+      <tr class="total">
+        <td><strong>Average</strong></td>
+        {% for key, label, unit, dp, better in all_metrics %}
+          <td class="num"><strong>{{ day_row[key] | metric(key) }}</strong></td>
+        {% endfor %}
+      </tr>
+    </tbody>
+  </table>
+</div>
+<form method="post" action="{{ url_for('weigh_in.delete_entry') }}" class="actions" style="margin-top:.6rem">
+  <input type="hidden" name="day" value="{{ day.isoformat() }}">
+  {% for slot in [1, 2] %}
+    {% if existing.get(slot) %}
+    <button class="small danger" name="slot" value="{{ slot }}">Delete weigh-in {{ slot }}</button>
+    {% endif %}
+  {% endfor %}
+  <button class="small danger" name="slot" value="all">Delete the whole day</button>
+</form>
+<p class="caption small">Deleting a day leaves a gap, which is re-estimated
+  from the readings either side the next time one is entered.</p>
+{% endif %}
+
+<h2>Recent days</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Date</th>{% for key, label, unit, dp, better in metrics %}<th class="num">{{ label }}</th>{% endfor %}<th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in recent %}
+      <tr {% if row.estimated %}class="estimated"{% endif %}>
+        <td class="day">{{ row.period | period }}{% if row.estimated %} <span class="tag est">est</span>{% endif %}</td>
+        {% for key, label, unit, dp, better in metrics %}<td class="num">{{ row[key] | metric(key) }}</td>{% endfor %}
+        <td><a class="button small" href="{{ url_for('weigh_in.input_page', day=row.period) }}">Edit</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">Nothing recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

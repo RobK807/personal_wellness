@@ -1,0 +1,13 @@
+[server]
+headless = true
+# 8501 is the CD dashboard; every dashboard gets its own port.
+port = 8502
+# Keep this on when the app sits behind Tailscale or a reverse proxy.
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#5cc4bb"

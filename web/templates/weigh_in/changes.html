@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Changes · Weigh-in Tracker{% endblock %}
+
+{% block content %}
+<h1>Changes</h1>
+
+<div class="segmented">
+  {% for key, (name, _) in bases.items() %}
+  <a href="{{ url_for('weigh_in.changes', basis=key, limit=limit) }}"
+     class="{{ 'on' if key == basis }}">{{ name }}</a>
+  {% endfor %}
+</div>
+
+<h2>{{ title }}</h2>
+<p class="caption">{{ caption }} Green is movement in the direction you want:
+  down for weight, BMI, body fat and visceral fat; up for skeletal muscle and
+  RM Kcal.</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>{{ 'Week' if grain == 'weekly' else ('Month' if grain == 'monthly' else 'Date') }}</th>
+        {% for key, label, unit, dp, better in all_metrics %}<th class="num">{{ label }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="day">{{ row.period | period(grain) }}</td>
+        {% for key, label, unit, dp, better in all_metrics %}
+        <td class="num delta {{ row[key] | direction(key) }}">{{ row[key] | change(key) }}</td>
+        {% endfor %}
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">Not enough data for this comparison yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="actions" style="margin-top:.8rem">
+  {% for n in [13, 26, 52, 200] %}
+  <a class="button small {{ 'primary' if n == limit }}"
+     href="{{ url_for('weigh_in.changes', basis=basis, limit=n) }}">Last {{ n }}</a>
+  {% endfor %}
+</p>
+{% endblock %}

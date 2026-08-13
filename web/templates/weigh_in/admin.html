@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Admin · Weigh-in Tracker{% endblock %}
+
+{% block content %}
+<h1>Admin</h1>
+
+<div class="card">
+  <h3>Where things are</h3>
+  <dl class="facts">
+    <dt>Database</dt><dd><code>{{ db_path }}</code></dd>
+    <dt>Workbook</dt><dd><code>{{ workbook }}</code></dd>
+    <dt>Exports</dt><dd><code>{{ export_dir }}</code></dd>
+    <dt>Recorded</dt>
+    <dd>{{ coverage.first_day | period }} to {{ coverage.last_day | period }}
+        — {{ coverage.days }} days, {{ coverage.readings }} real weigh-ins,
+        {{ coverage.estimated_days }} interpolated</dd>
+    <dt>Back-fill limit</dt><dd>{{ max_backfill }} days</dd>
+  </dl>
+</div>
+
+<h2>Snapshot</h2>
+<div class="card">
+  <p class="caption">Writes an .xlsx with the same tabs the original workbook
+    had, so the data is never locked inside this app.</p>
+  <form method="post" action="{{ url_for('weigh_in.export_now') }}">
+    <button class="primary" type="submit">Export to Excel</button>
+  </form>
+  {% if exports %}
+  <ul class="small" style="margin-top:.8rem">
+    {% for name in exports %}
+    <li><a href="{{ url_for('weigh_in.download_export', name=name) }}">{{ name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+<h2>Gaps</h2>
+<div class="card">
+  {% if gaps %}
+  <p class="caption">Stretches with no data at all. A gap is normally filled the
+    moment the next reading is entered, so anything here is either longer than
+    the {{ max_backfill }}-day limit, or waiting for a reading on the far side.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>After</th><th>Before</th><th class="num">Days</th><th></th></tr></thead>
+      <tbody>
+        {% for gap in gaps %}
+        <tr>
+          <td class="day">{{ gap.after | period }}</td>
+          <td class="day">{{ gap.before | period }}</td>
+          <td class="num">{{ gap.days }}</td>
+          <td>{% if gap.too_long %}<span class="tag est">too long to interpolate</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No gaps — every day between the first and last reading has a
+    value.</p>
+  {% endif %}
+</div>
+
+<h2>Rebuild the estimates</h2>
+<div class="card">
+  <p class="caption">Throws away every interpolated day and recomputes it from
+    the real readings either side. Worth doing after correcting a run of
+    entries; it never touches a real weigh-in.</p>
+  <form method="post" action="{{ url_for('weigh_in.rebuild_estimates') }}">
+    <button type="submit">Rebuild</button>
+  </form>
+</div>
+
+<h2>Recent activity</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>Entry</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for row in trail %}
+      <tr>
+        <td class="day small">{{ row.ts }}</td>
+        <td class="small">{{ row.action }}</td>
+        <td class="small">{{ row.entity_id or '' }}</td>
+        <td class="small muted">{{ row.detail }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">Nothing logged yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

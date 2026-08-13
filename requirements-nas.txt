@@ -1,0 +1,22 @@
+# Dependencies for the Flask front-end - the version that runs on the NAS.
+#
+# The NAS is a Synology DS218play (Realtek RTD1296, ARM64, DSM 7.2.2) with
+# 644 MB of RAM and roughly 149 MB free, of which the CD dashboard already
+# takes ~48 MB. Streamlit's stack measures ~176 MB resident, so it cannot run
+# there; this front-end measures ~30 MB.
+#
+# Everything here is pure Python: no numpy, no pandas, no pyarrow, nothing that
+# needs compiling or a matching glibc. It also works on the NAS's existing
+# Python 3.9, so SynoCommunity is not required.
+#
+# openpyxl is only needed if you want to export a spreadsheet from the NAS
+# itself; the workbook import is meant to be run on a desktop. Note that
+# openpyxl uses numpy opportunistically when it is installed - deliberately
+# leaving numpy out here keeps that path light, and openpyxl works fine without.
+#
+# These are the same three packages the CD dashboard needs, which is what makes
+# one shared venv on the NAS workable.
+
+Flask>=3.0,<4
+waitress>=3.0,<4
+openpyxl>=3.1,<4

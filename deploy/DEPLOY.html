@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Deploying</title>
+<style>
+:root {
+  --bg:#f7f9f9; --surface:#fff; --border:#dde4e4; --text:#17201f;
+  --muted:#62706e; --accent:#1f6f6b; --code-bg:#eef3f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#121817; --surface:#1a2221; --border:#2c3736; --text:#e6eceb;
+    --muted:#93a3a1; --accent:#5cc4bb; --code-bg:#1f2a29;
+  }
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; padding:2rem 1.25rem 5rem; background:var(--bg); color:var(--text);
+  font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%;
+}
+main { max-width:52rem; margin:0 auto; }
+h1,h2,h3,h4 { line-height:1.25; margin:2rem 0 .6rem; }
+h1 { font-size:1.9rem; margin-top:0; }
+h2 { font-size:1.35rem; padding-bottom:.3rem; border-bottom:1px solid var(--border); }
+h3 { font-size:1.1rem; }
+p,ul,ol { margin:0 0 1rem; }
+li { margin:.25rem 0; }
+a { color:var(--accent); }
+hr { border:0; border-top:1px solid var(--border); margin:2.5rem 0; }
+strong { font-weight:650; }
+blockquote {
+  margin:0 0 1rem; padding:.5rem 1rem; border-left:3px solid var(--accent);
+  background:var(--surface); color:var(--muted);
+}
+code {
+  font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:.88em;
+  background:var(--code-bg); padding:.12em .35em; border-radius:4px;
+}
+pre {
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  padding:.9rem 1rem; overflow-x:auto; margin:0 0 1rem;
+}
+pre code { background:none; padding:0; font-size:.85rem; }
+.table-wrap { overflow-x:auto; margin:0 0 1.25rem; }
+table { border-collapse:collapse; width:100%; font-size:.92rem;
+        background:var(--surface); border:1px solid var(--border);
+        border-radius:8px; overflow:hidden; }
+th,td { padding:.5rem .7rem; text-align:left; border-bottom:1px solid var(--border);
+        vertical-align:top; }
+th { font-size:.76rem; text-transform:uppercase; letter-spacing:.04em;
+     color:var(--muted); font-weight:600; }
+tbody tr:last-child td { border-bottom:0; }
+footer { max-width:52rem; margin:3rem auto 0; padding-top:1rem;
+         border-top:1px solid var(--border); color:var(--muted); font-size:.82rem; }
+</style>
+</head>
+<body>
+<main>
+<h1 id="deploying">Deploying</h1>
+<p>This is the <strong>second</strong> dashboard on the NAS, and it replaces the standalone
+weigh-in tracker rather than joining it — the weigh-in section here is that
+app, so running both would be two front doors onto two copies of the same six
+years of readings. Stop the old one on 8502 before starting this one on 8503;
+see <a href="#replacing-the-weigh-in-tracker">Replacing the weigh-in tracker</a>.</p>
+<p>The CD dashboard is already there on port 8501, and everything about the
+hardware that shaped how it was deployed applies here too — the same box, the same 149 MB of free RAM, the same absent
+Docker. What follows assumes the CD dashboard's setup is in place; if it is
+not, <a href="../../cd_dashboard/deploy/DEPLOY.html">cd_dashboard/deploy/DEPLOY.md</a> is
+the long version.</p>
+<p>The short version of the constraints:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model</td>
+<td>Synology DS218play, Realtek RTD1296, aarch64</td>
+</tr>
+<tr>
+<td>DSM</td>
+<td>7.2.2 build 72806</td>
+</tr>
+<tr>
+<td><strong>RAM</strong></td>
+<td><strong>644 MB total, ~149 MB free before anything of ours runs</strong></td>
+</tr>
+<tr>
+<td>Python</td>
+<td>3.8.15 (<code>/bin/python3</code>) and 3.9.22 (<code>/usr/local/bin/python3.9</code>)</td>
+</tr>
+<tr>
+<td>Docker</td>
+<td><strong>not available</strong> — Synology ships no Container Manager for Realtek</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>deploy/Dockerfile</code> and <code>deploy/docker-compose.yml</code> are kept for reference in
+case this ever moves to a machine that can run containers. They are not the
+path here.</p>
+<hr>
+<h2 id="1-memory-this-is-the-constraint-that-matters">1. Memory: this is the constraint that matters</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Free before anything of ours</td>
+<td>~149 MB</td>
+</tr>
+<tr>
+<td>Tailscale</td>
+<td>−25 MB (approx)</td>
+</tr>
+<tr>
+<td>CD dashboard</td>
+<td>−48 MB</td>
+</tr>
+<tr>
+<td><strong>This dashboard</strong></td>
+<td><strong>−30 MB</strong></td>
+</tr>
+<tr>
+<td>Left over</td>
+<td><strong>~46 MB</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>That works, and it is roughly where the DS218play stops having room. A third
+Flask dashboard would leave almost nothing and DSM would start swapping to
+disk, which on this hardware is painful. Check before adding anything:</p>
+<pre><code class="language-bash">free -m
+</code></pre>
+<p>Anything under ~40 MB free means it is time to stop, or time for a Raspberry Pi.</p>
+<p><strong>Streamlit will not run here.</strong> It measures ~172 MB resident and needs Python
+3.10+, which DSM does not have. That is why the Flask front-end exists, and why
+<code>web_test.py</code> fails if pandas is ever pulled onto its import path.</p>
+<hr>
+<h2 id="2-install">2. Install</h2>
+<p>The venv is shared with the CD dashboard and the dependencies are identical
+(Flask, waitress, openpyxl), so if the CD dashboard is already running there is
+<strong>nothing to install</strong>. Confirm it is there:</p>
+<pre><code class="language-bash">ls /volume1/dashboards/venv/bin/python
+</code></pre>
+<p>If it is missing:</p>
+<pre><code class="language-bash">cd /volume1/dashboards
+python3.9 -m venv venv
+venv/bin/pip install -r personal_wellness/requirements-nas.txt
+</code></pre>
+<p><code>run.sh</code> looks for a venv inside its own app folder first and falls back to the
+shared one alongside, so if this dashboard ever needs something incompatible it
+can be given its own <code>venv/</code> without disturbing the CD one. Split when a
+conflict actually appears, not in anticipation of one.</p>
+<h3 id="layout">Layout</h3>
+<pre><code>/volume1/dashboards/
+├── venv/                    shared interpreter and packages
+├── cd_dashboard/            port 8501
+└── personal_wellness/
+    ├── deploy/run.sh        starts this dashboard
+    └── data/wellness.db     every section's data, in one file
+</code></pre>
+<hr>
+<h2 id="3-first-deployment">3. First deployment</h2>
+<p>The database is built on the PC, not on the NAS — openpyxl opening the workbook
+needs far more memory than the NAS has free.</p>
+<pre><code class="language-bash">python -m core.excel_import --rebuild     # the weigh-in history
+python -m core.strava_import --rebuild    # the runs
+python reconcile_test.py
+python run_test.py
+python deploy/push_to_nas.py --with-db
+</code></pre>
+<p>Both importers write into the same <code>data/wellness.db</code>, and both are safe to
+re-run: the weigh-in one keys on date and slot, the run one on date, distance
+and elapsed time.</p>
+<p><code>push_to_nas.py</code> writes Unix line endings (DSM's <code>/bin/sh</code> fails on CRLF with
+misleading <code>not found</code> errors), skips caches and anything the NAS owns, leaves
+the workbook itself behind, and copies the database through SQLite's backup API
+rather than as a plain file, so it is a consistent snapshot. <code>--dry-run</code> lists
+what would change.</p>
+<p>Then, over SSH (enable it first: DSM → Control Panel → Terminal &amp; SNMP):</p>
+<pre><code class="language-bash">sh /volume1/dashboards/personal_wellness/deploy/run.sh
+</code></pre>
+<p>Browse to <code>http://synork807:8503</code> from the LAN. Logs go to <code>data/server.log</code>.</p>
+<h3 id="keep-it-running">Keep it running</h3>
+<p>DSM → <strong>Control Panel → Task Scheduler → Create → Triggered Task → User Defined
+Script</strong>, event <em>Boot-up</em>, user <em>root</em>:</p>
+<pre><code class="language-bash">sh /volume1/dashboards/personal_wellness/deploy/run.sh
+</code></pre>
+<p>Invoking it through <code>sh</code> avoids needing the executable bit, which an SMB copy
+cannot set. Run the task manually once before relying on the trigger. This is a
+second boot entry alongside the CD dashboard's, not a replacement for it.</p>
+<h3 id="setting-a-password">Setting a password</h3>
+<pre><code class="language-bash">printf 'something-long' &gt; /volume1/dashboards/personal_wellness/deploy/password.txt
+chmod 600 /volume1/dashboards/personal_wellness/deploy/password.txt
+</code></pre>
+<p><code>run.sh</code> picks it up automatically. Restart the app afterwards.</p>
+<hr>
+<h2 id="4-pushing-changes-later">4. Pushing changes later</h2>
+<pre><code class="language-bash">python deploy/push_to_nas.py
+sh /volume1/dashboards/personal_wellness/deploy/stop.sh
+sh /volume1/dashboards/personal_wellness/deploy/run.sh
+</code></pre>
+<p>The database is <strong>never</strong> pushed unless you ask. Once the dashboard is in use,
+the copy on the NAS is the live one and the copy on the PC is stale — pushing it
+would destroy every weigh-in entered from your phone since.</p>
+<h3 id="re-importing-the-workbook">Re-importing the workbook</h3>
+<p>Only if you deliberately want to re-baseline from the spreadsheet. On the PC:</p>
+<pre><code class="language-bash">python -m core.excel_import --rebuild
+python deploy/push_to_nas.py --with-db --force
+</code></pre>
+<p><code>--force</code> is required because this <strong>discards everything entered through the
+dashboard</strong> since the last import. Take a backup first, and expect to re-enter
+anything recent.</p>
+<hr>
+<h2 id="5-reaching-it-from-your-phone-tailscale">5. Reaching it from your phone — Tailscale</h2>
+<p>Already set up for the CD dashboard; this needs nothing new. Browse to
+<code>http://synork807:8503</code> with Tailscale running on the phone. Add it to the home
+screen and it behaves like an app.</p>
+<p>The reasoning, unchanged from the CD dashboard: Tailscale is a mesh VPN, so the
+phone and the NAS join one private network regardless of connection — mobile
+data, someone else's wifi, abroad, all identical to being on the LAN. Nothing is
+exposed to the public internet, no port forwarding, free for personal use.</p>
+<p><code>run.sh</code> binds to <code>0.0.0.0</code> because Tailscale traffic arrives on the NAS's
+Tailscale interface, not loopback. The NAS is not port-forwarded, so this does
+not put the app on the public internet — but keep <code>PW_APP_PASSWORD</code> set as a
+second layer.</p>
+<p>If MagicDNS is off, use the <code>100.x.y.z</code> address instead of the short name.</p>
+<hr>
+<h2 id="replacing-the-weigh-in-tracker">Replacing the weigh-in tracker</h2>
+<p>This dashboard's weigh-in section <em>is</em> the standalone tracker, so the two must
+not run side by side against separate databases — whichever one you happen to
+open would be missing whatever you entered in the other.</p>
+<p>The tracker on the NAS holds readings this PC has never seen — that is where
+the phone has been writing — so the migration runs <strong>from the NAS to here</strong>, not
+the other way round. Copying <code>wellness.db</code> up first would destroy them.</p>
+<p><strong>1. Stop the old dashboard.</strong> Over SSH:</p>
+<pre><code class="language-bash">sh /volume1/dashboards/weigh_in_tracker/deploy/stop.sh
+</code></pre>
+<p>Do this before the copy, not after. <code>sqlite3</code>'s backup API will read a database
+that is being written to quite happily, but a weigh-in entered between the copy
+and the switch lands in a file nothing will ever read again.</p>
+<p><strong>2. Adopt its database, on the PC:</strong></p>
+<pre><code class="language-bash">python deploy/adopt_weigh_ins.py --dry-run
+python deploy/adopt_weigh_ins.py
+</code></pre>
+<p>This takes the live <code>weigh_ins.db</code>, makes it the base of <code>wellness.db</code>, and
+re-imports the runs on top. It refuses if the old dashboard is still answering
+on 8502, if the live database is <em>older</em> than the local one, or if <code>wellness.db</code>
+holds a run that was entered by hand rather than imported — that last one being
+the only thing a rebuild would lose. What it replaces is kept beside it as
+<code>wellness.before-adopt-&lt;timestamp&gt;.db</code>.</p>
+<p>The runs are rebuilt rather than merged. Every one of them comes from
+<code>Final_data</code> and can be reproduced from it exactly, so there is nothing to
+reconcile; merging two databases would mean reconciling two audit logs, two
+sets of back-filled estimates and two ideas of which readings are real.</p>
+<p><strong>3. Check, then push:</strong></p>
+<pre><code class="language-bash">python run_test.py &amp;&amp; python reconcile_test.py
+python deploy/push_to_nas.py --with-db
+</code></pre>
+<p><strong>4. Start it, over SSH:</strong></p>
+<pre><code class="language-bash">sh /volume1/dashboards/personal_wellness/deploy/run.sh
+</code></pre>
+<p>Then browse to <code>http://synork807:8503</code> and confirm the weigh-in section shows
+today's reading and the run section shows the runs.</p>
+<p><strong>5. Stop the old one coming back.</strong> Its <code>run.sh</code> binds 8502 and this one binds
+8503, so a boot-up task still pointing at the old folder will quietly resurrect
+it at the next reboot — and then two dashboards are writing to two databases
+again. In DSM → Control Panel → Task Scheduler, point the boot-up task at
+<code>/volume1/dashboards/personal_wellness/deploy/run.sh</code>, or delete it and add a
+new one.</p>
+<p>Keep <code>/volume1/dashboards/weigh_in_tracker/</code> until you are satisfied, then
+delete it. Its database is the only copy of anything, and by then it is a
+superseded copy — but there is no hurry.</p>
+<hr>
+<h2 id="6-backups">6. Backups</h2>
+<p>The whole thing is one SQLite file. DSM does not ship the <code>sqlite3</code> CLI, so use
+Python's own backup API — same mechanism, always available:</p>
+<pre><code class="language-bash">/volume1/dashboards/venv/bin/python - &lt;&lt;'PY'
+import sqlite3, datetime, pathlib
+src = sqlite3.connect(&quot;/volume1/dashboards/personal_wellness/data/wellness.db&quot;)
+out = pathlib.Path(&quot;/volume1/backups&quot;) / f&quot;weigh_ins_{datetime.date.today():%Y%m%d}.db&quot;
+out.parent.mkdir(parents=True, exist_ok=True)
+dst = sqlite3.connect(out)
+src.backup(dst)
+dst.close(); src.close()
+print(&quot;backed up to&quot;, out)
+PY
+</code></pre>
+<p>Use this rather than copying the file — a plain copy of a live WAL database can
+be inconsistent. Schedule it nightly in DSM Task Scheduler.</p>
+<p>The <strong>Admin</strong> page also writes a plain <code>.xlsx</code> snapshot on demand, with the same
+tabs the original workbook had, so there is always a copy readable in Excel
+without the app.</p>
+<hr>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong><code>run.sh</code> reports it failed to start.</strong> It waits three seconds and checks
+whether anything is listening, printing the last few log lines if not. The most
+likely cause is code that needs Python 3.10 reaching the NAS's 3.9 — run
+<code>python py39_check.py</code> on the desktop before pushing.</p>
+<p><strong>Reading the log.</strong> <code>data/server.log</code> is appended to, so it holds every run.
+Each start writes a timestamped banner; anything above the last banner is
+history, not a current failure. To see only the current run:</p>
+<pre><code class="language-bash">awk '/^=====/{buf=&quot;&quot;} {buf=buf $0 ORS} END{printf &quot;%s&quot;, buf}' /volume1/dashboards/personal_wellness/data/server.log
+</code></pre>
+<p><strong>Reachable by ping but not on port 8503.</strong> The process is not running, or DSM's
+firewall is blocking the port. Control Panel → Security → Firewall; if it is
+enabled, add a rule allowing 8503 on the LAN interface. Note that the CD
+dashboard's rule covers 8501 only.</p>
+<p><strong>The wrong dashboard stopped.</strong> <code>stop.sh</code> matches on the port as well as
+<code>serve.py</code>, so it will not touch the CD dashboard — but if you have overridden
+<code>PW_WEB_PORT</code> in the shell, export the same value before running it.</p>
+<hr>
+<h2 id="if-the-nas-is-ever-upgraded">If the NAS is ever upgraded</h2>
+<p>Both front-ends share <code>core</code>, the same database and the same interpolation, so
+switching is a matter of which process you start:</p>
+<pre><code class="language-bash">streamlit run app.py     # richer UI, ~172 MB
+python serve.py          # lightweight, ~30 MB
+</code></pre>
+<p>On a roomier machine install <code>requirements.txt</code> instead of
+<code>requirements-nas.txt</code> and point the Task Scheduler entry at the Streamlit
+command. Nothing needs migrating.</p>
+<p>A Raspberry Pi 4/5 is the other easy upgrade path — an ordinary Linux box, so
+Docker and the container files in this folder become usable again. Keep
+<code>PW_DB_PATH</code> on the Pi's own storage, <strong>not</strong> on an SMB mount from the NAS:
+SQLite locking over SMB is unreliable and will eventually corrupt the file.</p>
+</main>
+<footer>Generated from <code>DEPLOY.md</code> by <code>render_docs.py</code>.
+Re-run it after editing the Markdown.</footer>
+</body>
+</html>

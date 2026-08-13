@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit run' if editing else 'Log a run' }} · Run tracker{% endblock %}
+
+{% macro value(name, fallback='') -%}
+{{ form[name] if form and form.get(name) is not none else fallback }}
+{%- endmacro %}
+
+{% block content %}
+<h1>{{ 'Edit run' if editing else 'Log a run' }}</h1>
+<p class="caption">
+  The fields the spreadsheet holds, minus the two it worked out for itself.
+  Pace is distance over time and the breakdown paces are each split over its
+  own distance, so both are shown back once the run is saved rather than typed
+  in — three columns that have to agree cannot be entered separately.
+</p>
+
+<form method="post" action="{{ url_for('runs.input_page', id=editing.id if editing else none) }}">
+
+  <div class="card">
+    <h3>The run</h3>
+    <div class="row three">
+      <div class="field">
+        <label for="day">Date</label>
+        <input type="date" id="day" name="day" required
+               max="{{ today.isoformat() }}"
+               value="{{ value('day', day.isoformat()) }}">
+      </div>
+      <div class="field">
+        <label for="distance_km">Distance (km)</label>
+        <input type="text" inputmode="decimal" id="distance_km" name="distance_km"
+               required placeholder="7.83"
+               value="{{ value('distance_km', editing.distance_km if editing else '') }}">
+      </div>
+      <div class="field">
+        <label for="duration_s">Time</label>
+        <input type="text" id="duration_s" name="duration_s" required
+               placeholder="41:54"
+               value="{{ value('duration_s', editing.duration_s | duration if editing else '') }}">
+      </div>
+    </div>
+
+    <div class="row three">
+      <div class="field">
+        <label for="run_type">Run type</label>
+        <input list="run-types" id="run_type" name="run_type" required
+               value="{{ value('run_type', editing.run_type if editing else 'Standard') }}">
+        <datalist id="run-types">
+          {% for option in run_types %}<option value="{{ option }}">{% endfor %}
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="effort_type">Effort type</label>
+        <input list="effort-types" id="effort_type" name="effort_type" required
+               value="{{ value('effort_type', editing.effort_type if editing else 'Base') }}">
+        <datalist id="effort-types">
+          {% for option in effort_types %}<option value="{{ option }}">{% endfor %}
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="note">Name or note</label>
+        <input type="text" id="note" name="note" placeholder="8k run (base)"
+               value="{{ value('note', editing.note if editing and editing.note else '') }}">
+      </div>
+    </div>
+    <p class="small muted">Times are <code>mm:ss</code> or <code>h:mm:ss</code>.
+      Run and effort type accept anything — the lists are what has been used
+      before, not a fixed set.</p>
+  </div>
+
+  {% set is_intervals = (form.get('run_type') if form else
+                         (editing.run_type if editing else '')) == 'Intervals' %}
+  {% set has_intervals = editing and editing.interval_type %}
+  <details class="panel" {{ 'open' if is_intervals or has_intervals }}>
+    <summary>Interval session</summary>
+    <div>
+      <p class="small muted">For a session run as reps. Leave it blank for
+        anything else. <strong>Type</strong> says which of the next two was the
+        target: <em>8 x 1k @ 3:50</em> sets the kilometre and the 3:50 is what
+        happened, <em>6 x 3min @ 783m</em> sets the three minutes and the
+        distance is what happened. Both are kept either way, so the average
+        split and the average pace are both worked out from them.</p>
+      <div class="row two">
+        <div class="field">
+          <label for="interval_type">Type</label>
+          <select id="interval_type" name="interval_type">
+            <option value="">Not an interval session</option>
+            {% for option in interval_types %}
+            {% set chosen = form.get('interval_type') if form
+                            else (editing.interval_type if editing else '') %}
+            <option value="{{ option }}" {{ 'selected' if option == chosen }}>
+              {{ interval_type_labels[option] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="interval_count">How many</label>
+          <input type="text" inputmode="numeric" id="interval_count"
+                 name="interval_count" placeholder="8"
+                 value="{{ value('interval_count',
+                                 editing.interval_count if editing and editing.interval_count else '') }}">
+        </div>
+      </div>
+      <div class="row two">
+        <div class="field">
+          <label for="interval_distance_m">Distance per interval</label>
+          <input type="text" id="interval_distance_m" name="interval_distance_m"
+                 placeholder="1k, 400m or 1.6km"
+                 value="{{ value('interval_distance_m',
+                                 editing.interval_distance_m | intervaldist
+                                 if editing and editing.interval_distance_m else '') }}">
+        </div>
+        <div class="field">
+          <label for="interval_split_s">Average split per interval</label>
+          <input type="text" id="interval_split_s" name="interval_split_s"
+                 placeholder="3:50"
+                 value="{{ value('interval_split_s',
+                                 editing.interval_split_s | duration
+                                 if editing and editing.interval_split_s else '') }}">
+        </div>
+      </div>
+      {% if editing and editing.interval_pace_s %}
+      <p class="small muted">Currently {{ editing.interval_split_s | duration }}
+        per interval, which over
+        {{ editing.interval_distance_m | intervaldist }} is
+        <strong>{{ editing.interval_pace_s | pace(true) }}</strong>.</p>
+      {% endif %}
+    </div>
+  </details>
+
+  <details class="panel" {{ 'open' if existing or (form and form.get('bd_0')) or not editing }}>
+    <summary>Best efforts inside the run</summary>
+    <div>
+      <p class="small muted">Strava's ladder. Fill in the rungs the run was long
+        enough to reach and leave the rest blank — a 7.83 km run has a fastest
+        5K in it and no fastest 10K. Each split must be no slower than the
+        shorter ones inside it, and no longer than the whole run.</p>
+      <div class="ladder">
+        {% for label, km in breakdowns %}
+        <div class="field">
+          <label for="bd_{{ loop.index0 }}">
+            <span>{{ label }}</span>
+            <span class="rung-km">{{ '%.3f'|format(km)|float }} km</span>
+          </label>
+          <input type="text" id="bd_{{ loop.index0 }}" name="bd_{{ loop.index0 }}"
+                 placeholder="mm:ss"
+                 value="{{ value('bd_' ~ loop.index0,
+                                 existing[label].seconds | duration if label in existing else '') }}">
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+
+  <p class="actions">
+    <button class="primary" type="submit">{{ 'Save changes' if editing else 'Save run' }}</button>
+    {% if editing %}
+    <a class="button" href="{{ url_for('runs.detail', run_id=editing.id) }}">Cancel</a>
+    {% endif %}
+  </p>
+</form>
+
+{% if not editing and outstanding %}
+<h2>Interval sessions still to fill in</h2>
+<p class="caption">Flagged as intervals by the spreadsheet, with nothing
+  recorded about them yet. This list empties itself as you go.</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th class="num">Distance</th><th class="num">Time</th>
+        <th class="num">Pace</th><th>Effort</th><th class="num">Best 400m</th>
+        <th class="num">Best 1K</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in outstanding %}
+      <tr>
+        <td class="day">{{ row.day | period }}</td>
+        <td class="num">{{ row.distance_km | km }}</td>
+        <td class="num">{{ row.duration_s | duration }}</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+        <td>{{ row.effort_type }}</td>
+        <td class="num">{{ best_400m.get(row.id) or '—' }}</td>
+        <td class="num">{{ best_1k.get(row.id) or '—' }}</td>
+        <td><a class="button small primary"
+               href="{{ url_for('runs.input_page', id=row.id) }}">Add</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">The two best-effort columns are there as a prompt: a session
+  of 1k reps will usually have a best 1K close to its average split.</p>
+{% endif %}
+
+{% if not editing and recent %}
+<h2>Recent runs</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th><th class="num">Distance</th><th class="num">Time</th>
+        <th class="num">Pace</th><th>Type</th><th>Effort</th>
+        <th class="num">Splits</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td class="day">{{ row.day | period }}</td>
+        <td class="num">{{ row.distance_km | km }}</td>
+        <td class="num">{{ row.duration_s | duration }}</td>
+        <td class="num">{{ row.pace_s | pace }}</td>
+        <td>{{ row.run_type }}</td>
+        <td>{{ row.effort_type }}</td>
+        <td class="num">{{ row.breakdowns }}</td>
+        <td><a class="button small" href="{{ url_for('runs.input_page', id=row.id) }}">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Weigh-in Tracker{% endblock %}
+
+{% block content %}
+<h1>Nothing recorded yet</h1>
+<p class="caption">Either import the six years already in the workbook, or just
+  start entering readings — the dashboard works either way.</p>
+
+<div class="card">
+  <h3>Import the workbook</h3>
+  <p class="caption">Run this on a desktop, not on the NAS: openpyxl needs more
+    memory to open the file than the NAS has free.</p>
+  <pre><code>python -m core.excel_import --rebuild</code></pre>
+  <p class="small muted">Reading from <code>{{ workbook }}</code></p>
+</div>
+
+<p class="actions">
+  <a class="button primary" href="{{ url_for('weigh_in.input_page') }}">Enter a weigh-in instead</a>
+</p>
+{% endblock %}

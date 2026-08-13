@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · {{ app_title }}{% endblock %}
+
+{% block content %}
+<div class="placeholder">
+  <h1>{{ heading }}</h1>
+  <p class="lede">{{ blurb }}</p>
+
+  <div class="card">
+    <h3>Not built yet</h3>
+    <p class="small">There are no tables for this behind the page — deliberately.
+      Guessing at a schema for a tracker that has not been designed is expensive
+      to undo once there is data in it, and the run tracker next door shows what
+      designed looks like: a ladder of best efforts is a very particular shape,
+      and it came from knowing what the sheet held.</p>
+    <p class="small">What has to be decided first:</p>
+    <ol>
+      {% for line in decisions %}<li>{{ line }}</li>{% endfor %}
+    </ol>
+  </div>
+
+  <div class="card">
+    <h3>How it gets built</h3>
+    <p class="small">The same shape as the run tracker, in this order:</p>
+    <pre>core/schema.sql        tables and views
+core/&lt;section&gt;.py      parsing, validation, formatting
+core/&lt;section&gt;_queries.py    reads, returning plain dicts
+core/&lt;section&gt;_mutations.py  writes
+web/blueprints/&lt;section&gt;.py  these pages, for real
+views/&lt;section&gt;/       the Streamlit side</pre>
+    <p class="small muted">The section already exists in
+      <code>config.SECTIONS</code>, which is where both front-ends read their
+      navigation from — so the sidebar entry, this page and the Streamlit
+      equivalent all come from one line.</p>
+  </div>
+</div>
+{% endblock %}
