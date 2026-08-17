@@ -214,6 +214,32 @@ sh /volume1/dashboards/personal_wellness/deploy/run.sh
 <p>The database is <strong>never</strong> pushed unless you ask. Once the dashboard is in use,
 the copy on the NAS is the live one and the copy on the PC is stale — pushing it
 would destroy every weigh-in entered from your phone since.</p>
+<h3 id="sending-a-workout-plan-across">Sending a workout plan across</h3>
+<p>A plan cannot get to the NAS the way the other sections' data did. <code>gym_import</code>
+reads a workbook, the workbooks are never pushed to the NAS, and openpyxl
+opening one needs more memory than the DS218play has free — so a plan is always
+built or imported on a desktop and carried across afterwards.</p>
+<pre><code class="language-bash">python deploy/send_plan.py                          # what is here, what is there
+python deploy/send_plan.py --plan &quot;2026 Gym Programme&quot;
+python deploy/send_plan.py --plan &quot;...&quot; --replace    # overwrite one of that name
+python deploy/send_plan.py --plan &quot;...&quot; --dry-run
+</code></pre>
+<p><strong>Stop the dashboard first.</strong> The script refuses while port 8503 answers,
+because this writes SQLite over SMB and that is only safe with exactly one
+writer:</p>
+<pre><code class="language-bash">sh /volume1/dashboards/personal_wellness/deploy/stop.sh
+python deploy/send_plan.py --plan &quot;2026 Gym Programme&quot;
+sh /volume1/dashboards/personal_wellness/deploy/run.sh
+</code></pre>
+<p>It touches <strong>only the eight workout tables, and only the rows of the plans
+named</strong>. The weigh-ins, the runs and the run option lists are never read from
+the source and never written. It backs the target up first, and reads every
+prescribed weight back afterwards to prove the transfer arrived intact — if that
+comparison fails it says so and names the backup to restore.</p>
+<p>Ids are not carried across: movements are matched <strong>by name</strong>, and anything the
+NAS catalogue has not got is added to it. That is what makes the script safe to
+run against a NAS whose catalogue has been edited since, and safe to run twice.</p>
+<p>Pointing <code>--target</code> at a local copy is a rehearsal, and needs nothing stopped.</p>
 <h3 id="re-importing-the-workbook">Re-importing the workbook</h3>
 <p>Only if you deliberately want to re-baseline from the spreadsheet. On the PC:</p>
 <pre><code class="language-bash">python -m core.excel_import --rebuild

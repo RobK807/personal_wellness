@@ -445,6 +445,16 @@ out of the dropdowns and leaves every plan using it reading exactly as it did;
 **Delete** is only offered for the ones no session has ever used, because
 anything else would leave a hole in a plan from two years ago.
 
+### Getting a plan onto the NAS
+
+A plan cannot follow either of the other sections' routes onto the NAS: the
+importer reads a workbook, the workbooks are never pushed there, and openpyxl
+opening one needs more memory than the DS218play has free. So a plan is built or
+imported on a desktop and carried across with `deploy/send_plan.py`, which moves
+only the workout tables, matches movements to the NAS catalogue **by name**
+rather than by id, and reads every prescribed weight back afterwards to prove it
+arrived. See [DEPLOY.md](deploy/DEPLOY.md).
+
 ### What the import checks rather than imports
 
 The workbook's *Weight (kg)* column, wherever a percentage sits beside it. It is

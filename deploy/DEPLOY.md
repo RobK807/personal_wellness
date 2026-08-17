@@ -157,6 +157,42 @@ The database is **never** pushed unless you ask. Once the dashboard is in use,
 the copy on the NAS is the live one and the copy on the PC is stale — pushing it
 would destroy every weigh-in entered from your phone since.
 
+### Sending a workout plan across
+
+A plan cannot get to the NAS the way the other sections' data did. `gym_import`
+reads a workbook, the workbooks are never pushed to the NAS, and openpyxl
+opening one needs more memory than the DS218play has free — so a plan is always
+built or imported on a desktop and carried across afterwards.
+
+```bash
+python deploy/send_plan.py                          # what is here, what is there
+python deploy/send_plan.py --plan "2026 Gym Programme"
+python deploy/send_plan.py --plan "..." --replace    # overwrite one of that name
+python deploy/send_plan.py --plan "..." --dry-run
+```
+
+**Stop the dashboard first.** The script refuses while port 8503 answers,
+because this writes SQLite over SMB and that is only safe with exactly one
+writer:
+
+```bash
+sh /volume1/dashboards/personal_wellness/deploy/stop.sh
+python deploy/send_plan.py --plan "2026 Gym Programme"
+sh /volume1/dashboards/personal_wellness/deploy/run.sh
+```
+
+It touches **only the eight workout tables, and only the rows of the plans
+named**. The weigh-ins, the runs and the run option lists are never read from
+the source and never written. It backs the target up first, and reads every
+prescribed weight back afterwards to prove the transfer arrived intact — if that
+comparison fails it says so and names the backup to restore.
+
+Ids are not carried across: movements are matched **by name**, and anything the
+NAS catalogue has not got is added to it. That is what makes the script safe to
+run against a NAS whose catalogue has been edited since, and safe to run twice.
+
+Pointing `--target` at a local copy is a rehearsal, and needs nothing stopped.
+
 ### Re-importing the workbook
 
 Only if you deliberately want to re-baseline from the spreadsheet. On the PC:

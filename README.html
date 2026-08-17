@@ -512,6 +512,14 @@ inheriting last block's completed sessions would be a lie about this one.</p>
 out of the dropdowns and leaves every plan using it reading exactly as it did;
 <strong>Delete</strong> is only offered for the ones no session has ever used, because
 anything else would leave a hole in a plan from two years ago.</p>
+<h3 id="getting-a-plan-onto-the-nas">Getting a plan onto the NAS</h3>
+<p>A plan cannot follow either of the other sections' routes onto the NAS: the
+importer reads a workbook, the workbooks are never pushed there, and openpyxl
+opening one needs more memory than the DS218play has free. So a plan is built or
+imported on a desktop and carried across with <code>deploy/send_plan.py</code>, which moves
+only the workout tables, matches movements to the NAS catalogue <strong>by name</strong>
+rather than by id, and reads every prescribed weight back afterwards to prove it
+arrived. See <a href="deploy/DEPLOY.html">DEPLOY.md</a>.</p>
 <h3 id="what-the-import-checks-rather-than-imports">What the import checks rather than imports</h3>
 <p>The workbook's <em>Weight (kg)</em> column, wherever a percentage sits beside it. It is
 <code>% × 1RM</code> rounded to 2.5 and nothing else, so importing it would be storing a
