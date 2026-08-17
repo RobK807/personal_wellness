@@ -46,9 +46,17 @@ def _setting(name: str, default: str | None = None) -> str | None:
 # `data/wellness.db` and the run tables appear alongside on first start.
 DB_PATH = Path(_setting("DB_PATH", str(APP_DIR / "data" / "wellness.db")))
 
-# The original weigh-in workbook. Only read by the importer, and only ever
-# read-only.
-SOURCE_XLSX = Path(_setting("SOURCE_XLSX", str(APP_DIR / "Weigh-in Tracker.xlsx")))
+# The original weigh-in workbook. Only read by the importer and by
+# reconcile_test.py, and only ever read-only.
+#
+# It lives in excel_versions/ with the other source workbooks rather than at the
+# top of the project. That folder is git-ignored and never pushed to the NAS -
+# nothing the dashboard serves reads it, because the readings are in the
+# database by then.
+EXCEL_DIR = Path(_setting("EXCEL_DIR", str(APP_DIR / "excel_versions")))
+
+SOURCE_XLSX = Path(_setting("SOURCE_XLSX",
+                            str(EXCEL_DIR / "Weigh-in Tracker.xlsx")))
 
 # The scraped Strava workbook behind the run tracker. Same deal: importer only.
 RUNS_XLSX = Path(

@@ -530,6 +530,7 @@ or drop its password gate.
 | | |
 | --- | --- |
 | `PW_DB_PATH` | where the SQLite file lives |
+| `PW_EXCEL_DIR` | the source workbooks — `excel_versions/` by default |
 | `PW_SOURCE_XLSX` | the weigh-in workbook, read-only, importer only |
 | `PW_RUNS_XLSX` | the Strava workbook, read-only, importer only |
 | `PW_RUNS_SHEET` | which tab of it to read — `Final_data` |

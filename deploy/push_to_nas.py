@@ -40,8 +40,13 @@ TEXT_NAMES = {".gitignore", "Dockerfile"}
 # strava_webscrape/ is the scraper and its raw output. It runs on a desktop,
 # against Strava, and nothing the NAS serves reads it - the runs are in the
 # database by the time they get there.
+#
+# excel_versions/ is the same story for the source workbooks: only the
+# importers and reconcile_test.py read them, both on a desktop. Named here as
+# well as caught by SKIP_XLSX, so that a note or a script dropped in beside them
+# does not quietly become the one thing in there that ships.
 SKIP_DIRS = {"__pycache__", ".git", ".idea", ".venv", "venv", "exports",
-             ".streamlit", ".claude", "strava_webscrape"}
+             ".streamlit", ".claude", "strava_webscrape", "excel_versions"}
 SKIP_SUFFIXES = {".pyc", ".pyo", ".db-wal", ".db-shm", ".key", ".log", ".pid"}
 SKIP_NAMES = {"password.txt"}
 
