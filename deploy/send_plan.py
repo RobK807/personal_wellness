@@ -98,10 +98,28 @@ def is_the_nas(target: Path) -> bool:
         return False
 
 
+def file_uri(path: Path) -> str:
+    """A SQLite `file:` URI, including for a UNC path.
+
+    `as_posix()` turns \\\\SynoRk807\\share\\x into //SynoRk807/share/x, and
+    prefixing that with "file:" gives file://SynoRk807/... - where SQLite reads
+    SynoRk807 as the URI's *authority*, which it only permits to be empty or
+    "localhost", and refuses with "invalid uri authority".
+
+    The form it wants is an empty authority followed by the UNC path, which is
+    four slashes: file:////SynoRk807/share/x. A drive-letter path needs none of
+    this.
+    """
+    text = path.as_posix()
+    return f"file://{text}" if text.startswith("//") else f"file:{text}"
+
+
 def connect(path: Path, read_only: bool = False) -> sqlite3.Connection:
     if read_only:
-        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{file_uri(path)}?mode=ro", uri=True)
     else:
+        # Not a URI: sqlite3 hands a plain path straight to the OS, and Windows
+        # opens a UNC path without any of the above.
         conn = sqlite3.connect(path)
         conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
@@ -109,7 +127,15 @@ def connect(path: Path, read_only: bool = False) -> sqlite3.Connection:
 
 
 def backup(target: Path) -> Path:
-    """A snapshot of the target before anything is written to it."""
+    """A snapshot of the target before anything is written to it.
+
+    One file, deliberately. The snapshot inherits the source's WAL journal mode,
+    and closing a WAL database only folds the -wal sidecar back in and deletes it
+    if the checkpoint succeeds - which it does not reliably do over SMB, leaving
+    a snapshot that is three files and a restore that quietly needs all of them.
+    Switching the copy to DELETE journalling checkpoints it and removes both
+    sidecars, so what is left is a single file that can be copied back.
+    """
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     destination = target.parent / f"{target.stem}.before-send-{stamp}.db"
     source = connect(target, read_only=True)
@@ -117,10 +143,13 @@ def backup(target: Path) -> Path:
         copy = sqlite3.connect(destination)
         try:
             source.backup(copy)
+            copy.execute("PRAGMA journal_mode = DELETE")
         finally:
             copy.close()
     finally:
         source.close()
+    for sidecar in ("-wal", "-shm"):     # belt and braces on a network share
+        Path(str(destination) + sidecar).unlink(missing_ok=True)
     return destination
 
 
