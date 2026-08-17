@@ -33,7 +33,7 @@ os.environ.pop("PW_APP_PASSWORD", None)  # test the app, not the login gate
 
 import config  # noqa: E402
 from core import (db, metrics, mutations, queries, run_mutations,  # noqa: E402
-                  run_queries, runs)
+                  run_options, run_queries, runs)
 from web import nav  # noqa: E402
 from web.app import create_app  # noqa: E402
 
@@ -188,6 +188,10 @@ def run_tracker(client) -> None:
         ("a date in the future",
          {"day": (TODAY + dt.timedelta(days=1)).isoformat()}),
         ("a blank effort type", {"effort_type": ""}),
+        # The lists are closed. A value not on one is refused rather than
+        # quietly becoming a seventh run type nobody chose.
+        ("a run type not on the list", {"run_type": "Fartlek"}),
+        ("an effort type not on the list", {"effort_type": "Very hard"}),
     ]
     base = {"day": (TODAY - dt.timedelta(days=2)).isoformat(),
             "distance_km": "6.00", "duration_s": "30:00",
@@ -316,6 +320,74 @@ def run_tracker(client) -> None:
     check("all five are null again",
           [cleared[key] for key in runs.INTERVAL_FIELDS],
           [None, None, None, None, None])
+
+    print("\nrun tracker: the dropdown lists, and the Admin page that owns them")
+    check("seeded from config plus whatever the runs use",
+          run_options.values("run_type"),
+          [*config.RUN_TYPES, *(v for v in run_queries.distinct("run_type")
+                                if v not in config.RUN_TYPES)])
+    check("nothing in use is missing from a list",
+          [run_options.orphans(kind) for kind in run_options.KINDS], [[], []])
+
+    admin = client.get(RUNS + "/admin").get_data(as_text=True)
+    check("the Admin page offers both boxes",
+          all(f'name="options"' in admin and f'value="{kind}"' in admin
+              for kind in run_options.KINDS), True)
+    check("with the usage counts beside them",
+          ">Standard<" in admin and ">Warm-up / warm down<" in admin, True)
+
+    # Adding one: it appears on the list, and the form then accepts it.
+    body = client.post(RUNS + "/admin", data={
+        "kind": "run_type", "action": "save",
+        "options": "\n".join(run_options.values("run_type") + ["Fartlek"])},
+        follow_redirects=True).get_data(as_text=True)
+    check("saving reports what it did", "added Fartlek" in body, True)
+    check("and the list has it", "Fartlek" in run_options.values("run_type"),
+          True)
+    check("the Log page offers it",
+          'value="Fartlek"' in
+          client.get(RUNS + "/log").get_data(as_text=True), True)
+    accepted = client.post(RUNS + "/log", data={
+        **base, "day": (TODAY - dt.timedelta(days=3)).isoformat(),
+        "run_type": "Fartlek"}, follow_redirects=True).get_data(as_text=True)
+    check("and a run can now be saved as one",
+          'class="flash flash-error"' in accepted, False)
+
+    # Removing one that is in use is refused; removing the unused one is not.
+    body = client.post(RUNS + "/admin", data={
+        "kind": "run_type", "action": "save",
+        "options": "\n".join(v for v in run_options.values("run_type")
+                             if v != "Standard")},
+        follow_redirects=True).get_data(as_text=True)
+    check("refuses to drop a type runs are using",
+          "cannot be taken off the list" in body, True)
+    check("and the list is untouched",
+          "Standard" in run_options.values("run_type"), True)
+
+    print("\nrun tracker: the list survives being edited badly")
+    for label, options in [("an empty list", "   \n\n  "),
+                           ("a wall of text", "x" * 200)]:
+        body = client.post(RUNS + "/admin", data={
+            "kind": "run_type", "action": "save", "options": options},
+            follow_redirects=True).get_data(as_text=True)
+        check(f"refuses {label}", 'class="flash flash-error"' in body, True)
+
+    reordered = list(reversed(run_options.values("effort_type")))
+    body = client.post(RUNS + "/admin", data={
+        "kind": "effort_type", "action": "save",
+        "options": "\n".join(reordered)},
+        follow_redirects=True).get_data(as_text=True)
+    check("reordering is allowed", run_options.values("effort_type"), reordered)
+    check("and says so", "reordered" in body, True)
+    check("duplicates and blank lines are dropped",
+          run_options.clean([" Base ", "base", "", "  ", "Tempo"]),
+          ["Base", "Tempo"])
+
+    client.post(RUNS + "/admin", data={"kind": "effort_type", "action": "reset"},
+                follow_redirects=True)
+    check("reset puts the seed order back",
+          run_options.values("effort_type")[:len(config.EFFORT_TYPES)],
+          config.EFFORT_TYPES)
 
     print("\nrun tracker: deleting takes the splits with it")
     splits_before = db.scalar("SELECT COUNT(*) FROM run_bests", default=0)

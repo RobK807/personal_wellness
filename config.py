@@ -210,9 +210,17 @@ BREAKDOWN_KM = {label: km for label, km in BREAKDOWNS}
 # Position in the ladder, for sorting a set of breakdowns back into order.
 BREAKDOWN_ORDER = {label: index for index, (label, _) in enumerate(BREAKDOWNS)}
 
-# The two ways a run is classified. Both come from the workbook, and both are
-# free text in the database rather than a foreign key - a new kind of session
-# should not need a migration - but these are what the input form offers.
+# The two ways a run is classified, as the workbook classifies them.
+#
+# These are **seeds, not the live lists**. What the dropdowns offer lives in the
+# `run_options` table and is edited on the Admin page, because a new kind of
+# session should be something you add in the app rather than something that
+# needs a code edit, a push to the NAS and a restart. core/db.py
+# _seed_run_options fills that table from these lists exactly once - on a
+# database that has none - together with anything the imported runs already use,
+# which is how 'Unclassified' gets there. Editing these afterwards changes
+# nothing; editing them and expecting it to is the mistake this note exists to
+# prevent. See core/run_options.py.
 RUN_TYPES = ["Standard", "Race", "Weighted", "Pace", "Sprints", "Intervals"]
 EFFORT_TYPES = ["Base", "Threshold", "Tempo", "VO2 max", "Race",
                 "Warm-up / warm down"]

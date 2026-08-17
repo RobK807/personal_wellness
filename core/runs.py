@@ -179,23 +179,33 @@ def parse_distance(raw) -> float:
 
 
 def parse_choice(raw, allowed: Sequence[str], label: str) -> str:
-    """A run or effort type. New ones are allowed; blank ones are not.
+    """A run or effort type, which has to be one the list offers.
 
-    The column is free text in the database on purpose - a new kind of session
-    should not need a migration - so this only insists that something was
-    chosen, and tidies the spelling of anything already known.
+    The list is a closed one, kept in the database and edited on the Admin page
+    - see core/run_options.py for why it is closed. Matching is
+    case-insensitive and the stored spelling wins, so a value arriving from
+    somewhere other than the dropdown cannot quietly fork an option in two.
     """
-    text = (str(raw or "")).strip()
+    text = " ".join(str(raw or "").split())
     if not text:
         raise InvalidRun(f"{label} is required")
     for option in allowed:
         if option.casefold() == text.casefold():
             return option
-    return text
+    raise InvalidRun(
+        f"'{text}' is not one of the {label.lower()} options"
+        + (f" ({', '.join(allowed)})" if allowed else "")
+        + ". The list is on the Admin page")
 
 
-def parse_run(values: Mapping[str, object], today: dt.date | None = None) -> dict:
-    """Parse the run itself - everything except the breakdowns."""
+def parse_run(values: Mapping[str, object], allowed: Mapping[str, Sequence[str]],
+              today: dt.date | None = None) -> dict:
+    """Parse the run itself - everything except the breakdowns.
+
+    `allowed` carries the two dropdown lists, keyed 'run_type' and
+    'effort_type'. Passed in rather than looked up, so this module stays the
+    rules and nothing else: it does not know there is a database.
+    """
     when = as_date(values.get("day"))
     if when > (today or dt.date.today()):
         raise InvalidRun(f"{when:%d/%m/%Y} is in the future")
@@ -212,10 +222,11 @@ def parse_run(values: Mapping[str, object], today: dt.date | None = None) -> dic
         "day": when,
         "distance_km": distance,
         "duration_s": duration,
-        "run_type": parse_choice(values.get("run_type"), config.RUN_TYPES,
-                                 "Run type"),
+        "run_type": parse_choice(values.get("run_type"),
+                                 allowed.get("run_type") or (), "Run type"),
         "effort_type": parse_choice(values.get("effort_type"),
-                                    config.EFFORT_TYPES, "Effort type"),
+                                    allowed.get("effort_type") or (),
+                                    "Effort type"),
         "note": (str(values.get("note") or "")).strip() or None,
         **parse_intervals(values, distance, duration),
     }

@@ -233,12 +233,44 @@ back after reloading. A run whose date, distance or time has since changed in
 the sheet cannot be matched, and the import says so rather than dropping it
 quietly.
 
+### Run type and effort type
+
+Both are **closed lists**, chosen from a dropdown and edited on the **Admin
+page** — one option per line, in the order the dropdown offers them. They live
+in the `run_options` table rather than in `config.py`, because adding a kind of
+session should not need a code edit, a push to the NAS and a restart.
+
+A free-text box was the first cut and the wrong one. It eventually produces
+`VO2 max`, `VO2 Max` and `VO2max` as three effort types, each owning a slice of
+the analysis and none of them telling the truth about the training.
+
+`config.RUN_TYPES` and `config.EFFORT_TYPES` are the **seed**, used once on a
+database that has no list yet, alongside whatever the imported runs already use
+— which is how a value like `Unclassified` gets onto the list rather than
+leaving the run carrying it impossible to edit. Editing those constants
+afterwards changes nothing.
+
+Two rules keep the lists and the history in step, since `runs.run_type` is plain
+`TEXT` rather than a foreign key:
+
+- **An option in use cannot be removed.** The message names it and says how
+  many runs have it. A rename reads as a removal, so `VO2 max` → `VO2 Max` is
+  refused too, rather than stranding thirty-two runs.
+- **The importer extends the list rather than bypassing it.** The spreadsheet is
+  where this vocabulary came from, so a new word in it becomes a new option
+  (`core/run_options.register`). The importer itself still does not validate —
+  its job is to reproduce the sheet.
+
+**Reset** puts one list back to the seed plus anything runs still use. Anything
+in use but not offered is highlighted on the Admin page, which is how you find
+out that all of the above has gone wrong somehow.
+
 ### Analysis
 
-Split by **run type** (Standard, Race, Weighted, Pace, Sprints, Intervals) and
-by **effort type** (Base, Threshold, Tempo, VO2 max, Race, Warm-up), with a
-grid of the two crossed, a scatter of every run — how far against how fast — and
-volume and pace over time.
+Split by **run type** and by **effort type**, with a grid of the two crossed, a
+scatter of every run — how far against how fast — and volume and pace over time.
+The filter dropdowns read the values the data actually contains, not the option
+lists, so a type nothing uses does not clutter them.
 
 **Pace across a group is its total time over its total distance, not the mean of
 each run's pace.** A 20 km plod and a 2 km sprint should not count equally

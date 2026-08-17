@@ -17,7 +17,7 @@ import datetime as dt
 import sqlite3
 from typing import Mapping, Sequence
 
-from core import db, runs
+from core import db, run_options, runs
 from core.runs import InvalidRun  # re-exported: callers catch one thing
 
 
@@ -33,7 +33,7 @@ def save_run(values: Mapping[str, object],
     `run_id` names the run being edited. Without it this is a new run, and an
     existing run with the same date, distance and time is updated in place.
     """
-    parsed = runs.parse_run(values)
+    parsed = runs.parse_run(values, run_options.all_values())
     ladder = runs.parse_breakdowns(breakdowns or {}, parsed["distance_km"],
                                    parsed["duration_s"])
 

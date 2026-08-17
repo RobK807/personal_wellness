@@ -151,16 +151,19 @@ def main() -> int:
           db.scalar("SELECT COUNT(*) FROM run_bests", default=0),
           result["splits"])
     check("runs with no breakdown at all", result["without_splits"], 3)
-    # One run's type and effort come through as #N/A: Clean_data looks both up
-    # with OFFSET/MATCH over a fixed range and this run's id falls outside it.
-    # The run is imported - it happened - with its classification recorded as
-    # unknown rather than as the error text.
+    # The 08/09/2025 run used to come through as #N/A in both columns:
+    # Clean_data looks them up with OFFSET/MATCH over a fixed range and that
+    # run's id fell outside it. It was fixed at source on 17/08/2026 and now
+    # reads Standard/Base. The handling stays - a run the sheet cannot classify
+    # is imported as Unclassified rather than as the error text, because the run
+    # happened - and this asserts there are none left, so a new one shows up
+    # here rather than quietly joining the analysis.
     check("runs the sheet could not classify",
-          result["runs_the_sheet_could_not_classify"], 1)
-    check("and which one",
+          result["runs_the_sheet_could_not_classify"], 0)
+    check("and none left as Unclassified",
           [(r["day"], r["distance_km"]) for r in
            run_queries.runs_list(run_type="Unclassified")],
-          [("2025-09-08", 4.15)])
+          [])
     # The oldest 51 rows have lost their date and time number formats, so they
     # arrive as bare Excel serials. The values are intact and the importer
     # converts them; this asserts that it is still having to.

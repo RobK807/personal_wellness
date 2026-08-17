@@ -303,11 +303,38 @@ importer keeps the interval columns against each run's identity and puts them
 back after reloading. A run whose date, distance or time has since changed in
 the sheet cannot be matched, and the import says so rather than dropping it
 quietly.</p>
+<h3 id="run-type-and-effort-type">Run type and effort type</h3>
+<p>Both are <strong>closed lists</strong>, chosen from a dropdown and edited on the <strong>Admin
+page</strong> — one option per line, in the order the dropdown offers them. They live
+in the <code>run_options</code> table rather than in <code>config.py</code>, because adding a kind of
+session should not need a code edit, a push to the NAS and a restart.</p>
+<p>A free-text box was the first cut and the wrong one. It eventually produces
+<code>VO2 max</code>, <code>VO2 Max</code> and <code>VO2max</code> as three effort types, each owning a slice of
+the analysis and none of them telling the truth about the training.</p>
+<p><code>config.RUN_TYPES</code> and <code>config.EFFORT_TYPES</code> are the <strong>seed</strong>, used once on a
+database that has no list yet, alongside whatever the imported runs already use
+— which is how a value like <code>Unclassified</code> gets onto the list rather than
+leaving the run carrying it impossible to edit. Editing those constants
+afterwards changes nothing.</p>
+<p>Two rules keep the lists and the history in step, since <code>runs.run_type</code> is plain
+<code>TEXT</code> rather than a foreign key:</p>
+<ul>
+<li><strong>An option in use cannot be removed.</strong> The message names it and says how
+  many runs have it. A rename reads as a removal, so <code>VO2 max</code> → <code>VO2 Max</code> is
+  refused too, rather than stranding thirty-two runs.</li>
+<li><strong>The importer extends the list rather than bypassing it.</strong> The spreadsheet is
+  where this vocabulary came from, so a new word in it becomes a new option
+  (<code>core/run_options.register</code>). The importer itself still does not validate —
+  its job is to reproduce the sheet.</li>
+</ul>
+<p><strong>Reset</strong> puts one list back to the seed plus anything runs still use. Anything
+in use but not offered is highlighted on the Admin page, which is how you find
+out that all of the above has gone wrong somehow.</p>
 <h3 id="analysis">Analysis</h3>
-<p>Split by <strong>run type</strong> (Standard, Race, Weighted, Pace, Sprints, Intervals) and
-by <strong>effort type</strong> (Base, Threshold, Tempo, VO2 max, Race, Warm-up), with a
-grid of the two crossed, a scatter of every run — how far against how fast — and
-volume and pace over time.</p>
+<p>Split by <strong>run type</strong> and by <strong>effort type</strong>, with a grid of the two crossed, a
+scatter of every run — how far against how fast — and volume and pace over time.
+The filter dropdowns read the values the data actually contains, not the option
+lists, so a type nothing uses does not clutter them.</p>
 <p><strong>Pace across a group is its total time over its total distance, not the mean of
 each run's pace.</strong> A 20 km plod and a 2 km sprint should not count equally
 towards how fast the running was.</p>

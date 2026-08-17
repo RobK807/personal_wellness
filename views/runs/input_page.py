@@ -11,7 +11,7 @@ import datetime as dt
 import streamlit as st
 
 import config
-from core import metrics, run_mutations, run_queries, runs
+from core import metrics, run_mutations, run_options, run_queries, runs
 from views import run_frames as frames
 
 
@@ -75,17 +75,20 @@ def _form(editing: dict | None) -> None:
             value=runs.fmt_duration(editing["duration_s"]) if editing else "",
             placeholder="41:54")
 
+        offered = run_options.all_values()
         left, middle, right = st.columns(3)
         run_type = left.selectbox(
-            "Run type", _options(config.RUN_TYPES,
+            "Run type", _options(offered["run_type"],
                                  editing["run_type"] if editing else None),
-            index=_index(config.RUN_TYPES,
-                         editing["run_type"] if editing else "Standard"))
+            index=_index(offered["run_type"],
+                         editing["run_type"] if editing else None),
+            help="Set on the Admin page.")
         effort_type = middle.selectbox(
-            "Effort type", _options(config.EFFORT_TYPES,
+            "Effort type", _options(offered["effort_type"],
                                     editing["effort_type"] if editing else None),
-            index=_index(config.EFFORT_TYPES,
-                         editing["effort_type"] if editing else "Base"))
+            index=_index(offered["effort_type"],
+                         editing["effort_type"] if editing else None),
+            help="Set on the Admin page.")
         note = right.text_input(
             "Name or note", value=(editing["note"] or "") if editing else "",
             placeholder="8k run (base)")
@@ -244,11 +247,12 @@ def _show_records(run_id: int) -> None:
 
 
 def _options(known: list, current: str | None) -> list:
-    """The known values, plus whatever this run already uses.
+    """The list, plus whatever this run already uses if the list has lost it.
 
-    Both columns are free text in the database - a new kind of session should
-    not need a migration - so a run imported with a type nobody has offered
-    since must still be editable without silently being reclassified.
+    The lists are closed, and core/run_options.py will not let a value with
+    runs against it be removed - so the second half should never fire. It is
+    here because the alternative, if it ever did, is a run that silently
+    reclassifies itself the moment somebody opens it to fix a typo.
     """
     if current and current not in known:
         return [*known, current]

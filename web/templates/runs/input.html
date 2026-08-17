@@ -40,21 +40,30 @@
     </div>
 
     <div class="row three">
+      {# Both lists come from run_options, and both are closed - see
+         core/run_options.py. `chosen` falls back through what was typed, what
+         the run already says, and the first option on the list. #}
       <div class="field">
         <label for="run_type">Run type</label>
-        <input list="run-types" id="run_type" name="run_type" required
-               value="{{ value('run_type', editing.run_type if editing else 'Standard') }}">
-        <datalist id="run-types">
-          {% for option in run_types %}<option value="{{ option }}">{% endfor %}
-        </datalist>
+        {% set chosen = value('run_type', editing.run_type if editing else '') %}
+        <select id="run_type" name="run_type" required>
+          {% for option in run_types %}
+          <option value="{{ option }}"
+            {{ 'selected' if option == chosen or (not chosen and loop.first) }}>
+            {{ option }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div class="field">
         <label for="effort_type">Effort type</label>
-        <input list="effort-types" id="effort_type" name="effort_type" required
-               value="{{ value('effort_type', editing.effort_type if editing else 'Base') }}">
-        <datalist id="effort-types">
-          {% for option in effort_types %}<option value="{{ option }}">{% endfor %}
-        </datalist>
+        {% set chosen = value('effort_type', editing.effort_type if editing else '') %}
+        <select id="effort_type" name="effort_type" required>
+          {% for option in effort_types %}
+          <option value="{{ option }}"
+            {{ 'selected' if option == chosen or (not chosen and loop.first) }}>
+            {{ option }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div class="field">
         <label for="note">Name or note</label>
@@ -63,8 +72,8 @@
       </div>
     </div>
     <p class="small muted">Times are <code>mm:ss</code> or <code>h:mm:ss</code>.
-      Run and effort type accept anything — the lists are what has been used
-      before, not a fixed set.</p>
+      Run and effort type offer a fixed list each; both are edited on the
+      <a href="{{ url_for('runs.admin') }}">Admin page</a>.</p>
   </div>
 
   {% set is_intervals = (form.get('run_type') if form else

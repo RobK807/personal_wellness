@@ -4,8 +4,76 @@ from __future__ import annotations
 import streamlit as st
 
 import config
-from core import metrics, runs
+from core import metrics, run_options, runs
 from views import run_frames as frames
+
+
+def _option_lists() -> None:
+    """The two dropdown lists, edited one option per line.
+
+    A text box rather than a row of add/remove/move buttons, because that is
+    one control that does all four things and one save that either takes or
+    does not. The rule that stops it going wrong is in core/run_options.py: a
+    value some run still uses cannot be dropped, and a rename reads as a drop.
+    """
+    st.subheader("Run type and effort type")
+    st.caption(
+        "What the two dropdowns on the Log page offer, one per line, in the "
+        "order they offer it. Both lists are closed — the form will not accept "
+        "anything that is not on them, which is what stops *VO2 max*, *VO2 "
+        "Max* and *VO2max* becoming three effort types that each own a slice "
+        "of the analysis."
+    )
+
+    for column, kind in zip(st.columns(len(run_options.KINDS)),
+                            run_options.KINDS):
+        label = run_options.LABELS[kind]
+        with column:
+            with st.form(f"options_{kind}"):
+                typed = st.text_area(label, value=run_options.as_form(kind),
+                                     height=230, key=f"options_text_{kind}")
+                left, right = st.columns(2)
+                saved = left.form_submit_button("Save", type="primary")
+                reset = right.form_submit_button(
+                    "Reset", help="Back to the built-in list, plus anything "
+                                  "runs still use")
+            if saved or reset:
+                try:
+                    if reset:
+                        run_options.reset(kind)
+                        st.success(f"{label} list put back to the built-in "
+                                   f"one, plus anything runs still use.")
+                    else:
+                        run_options.replace(kind,
+                                            run_options.parse_form(typed))
+                        st.success(f"{label} list saved.")
+                    # The text box holds the old value until its key is
+                    # cleared, and a list that reads differently from the one
+                    # that was saved is worse than a rerun.
+                    st.session_state.pop(f"options_text_{kind}", None)
+                    st.rerun()
+                except run_options.InvalidOption as exc:
+                    st.error(str(exc))
+
+            counts = {row["value"]: row["runs"]
+                      for row in run_options.with_usage(kind)}
+            stranded = run_options.orphans(kind)
+            st.dataframe(
+                [{label: value, "Runs": count or 0}
+                 for value, count in counts.items()]
+                + [{label: row["value"], "Runs": row["runs"]}
+                   for row in stranded],
+                hide_index=True, width="stretch")
+            if stranded:
+                st.warning(
+                    f"{', '.join(row['value'] for row in stranded)} "
+                    f"{'is' if len(stranded) == 1 else 'are'} used by runs but "
+                    f"not offered by the list, so those runs cannot be saved "
+                    f"from the form until the spelling is added back.")
+            else:
+                st.caption("A value with runs against it cannot be removed — "
+                           "change those runs first. Everything here is safe "
+                           "to reorder.")
 
 
 def render() -> None:
@@ -31,6 +99,10 @@ def render() -> None:
         f"{runs.fmt_duration(coverage['duration_s'], force_hours=True)} of "
         f"running."
     )
+
+    st.divider()
+
+    _option_lists()
 
     st.divider()
 

@@ -20,7 +20,7 @@ from flask import (Blueprint, abort, flash, redirect, render_template, request,
                    url_for)
 
 import config
-from core import run_mutations, run_queries, runs
+from core import run_mutations, run_options, run_queries, runs
 from web import run_charts
 from web.app import login_required
 
@@ -162,8 +162,8 @@ def input_page():
         day=when,
         today=dt.date.today(),
         breakdowns=config.BREAKDOWNS,
-        run_types=config.RUN_TYPES,
-        effort_types=config.EFFORT_TYPES,
+        run_types=run_options.values('run_type'),
+        effort_types=run_options.values('effort_type'),
         interval_types=config.INTERVAL_TYPES,
         interval_type_labels=config.INTERVAL_TYPE_LABELS,
         interval_field_help=config.INTERVAL_FIELD_HELP,
@@ -353,9 +353,24 @@ def data():
 # --------------------------------------------------------------------------- #
 # Admin
 # --------------------------------------------------------------------------- #
-@bp.route("/admin")
+@bp.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin():
+    if request.method == "POST":
+        kind = request.form.get("kind", "")
+        try:
+            if request.form.get("action") == "reset":
+                run_options.reset(kind)
+                flash(f"{run_options.LABELS[kind]} list put back to the "
+                      f"built-in one, plus anything runs still use.", "ok")
+            else:
+                result = run_options.replace(
+                    kind, run_options.parse_form(request.form.get("options")))
+                flash(_options_saved(result), "ok")
+        except (run_options.InvalidOption, KeyError) as exc:
+            flash(str(exc).strip("'"), "error")
+        return redirect(url_for("runs.admin"))
+
     return render_template(
         "runs/admin.html",
         coverage=run_queries.coverage(),
@@ -366,4 +381,25 @@ def admin():
         workbook=config.RUNS_XLSX,
         sheet=config.RUNS_SHEET,
         breakdowns=config.BREAKDOWNS,
+        option_labels=run_options.LABELS,
+        option_text={kind: run_options.as_form(kind)
+                     for kind in run_options.KINDS},
+        option_usage={kind: run_options.with_usage(kind)
+                      for kind in run_options.KINDS},
+        option_orphans={kind: run_options.orphans(kind)
+                        for kind in run_options.KINDS},
     )
+
+
+def _options_saved(result: dict) -> str:
+    """Say what the save actually did, rather than just that it happened."""
+    label = run_options.LABELS[result["kind"]]
+    parts = []
+    if result["added"]:
+        parts.append("added " + ", ".join(result["added"]))
+    if result["removed"]:
+        parts.append("removed " + ", ".join(result["removed"]))
+    if result["reordered"] and not parts:
+        parts.append("reordered")
+    return (f"{label}: {'; '.join(parts)}." if parts
+            else f"{label} list unchanged.")

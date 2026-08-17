@@ -20,6 +20,61 @@
   </dl>
 </div>
 
+<h2>Run type and effort type</h2>
+<p class="caption">
+  What the two dropdowns on the Log page offer, one per line, in the order they
+  offer it. Both lists are closed — the form will not accept anything that is
+  not on them, which is what stops <em>VO2 max</em>, <em>VO2 Max</em> and
+  <em>VO2max</em> becoming three effort types that each own a slice of the
+  analysis.
+</p>
+<div class="row two">
+  {% for kind, label in option_labels.items() %}
+  <div class="card">
+    <h3>{{ label }}</h3>
+    <form method="post" action="{{ url_for('runs.admin') }}">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <div class="field">
+        <label for="options_{{ kind }}" class="visually-hidden">{{ label }} options</label>
+        <textarea id="options_{{ kind }}" name="options" rows="9"
+                  spellcheck="false">{{ option_text[kind] }}</textarea>
+      </div>
+      <p class="actions">
+        <button class="primary" type="submit" name="action" value="save">Save {{ label|lower }}s</button>
+        <button type="submit" name="action" value="reset"
+                title="Back to the built-in list, plus anything runs still use">Reset</button>
+      </p>
+    </form>
+    <table class="compact">
+      <thead><tr><th>{{ label }}</th><th class="num">Runs</th></tr></thead>
+      <tbody>
+        {% for row in option_usage[kind] %}
+        <tr>
+          <td>{{ row.value }}</td>
+          <td class="num {{ 'muted' if not row.runs }}">{{ row.runs or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% for row in option_orphans[kind] %}
+        <tr class="flagged">
+          <td>{{ row.value }}</td>
+          <td class="num">{{ row.runs }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if option_orphans[kind] %}
+    <p class="small muted">The highlighted {{ option_orphans[kind] | length }}
+      {{ 'is' if option_orphans[kind] | length == 1 else 'are' }} used by runs
+      but not offered by the list, so those runs cannot be saved from the form
+      until the spelling is added back.</p>
+    {% else %}
+    <p class="small muted">A value with runs against it cannot be removed —
+      change those runs first. Everything here is safe to reorder.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
 <h2>Splits that cannot be true</h2>
 {% if anomalies %}
 <p class="caption">

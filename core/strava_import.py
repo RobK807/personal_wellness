@@ -68,7 +68,7 @@ import datetime as dt
 from pathlib import Path
 
 import config
-from core import db, run_mutations, runs
+from core import db, run_mutations, run_options, runs
 
 # openpyxl is imported lazily inside run_import(). Importing this module must
 # stay cheap: the Flask front-end runs on a NAS with ~150 MB of RAM free, and
@@ -280,6 +280,17 @@ def run_import(source: Path | None = None, sheet: str | None = None,
                 "FROM runs WHERE interval_type IS NOT NULL")
         }
 
+        # Whatever the sheet classifies runs as becomes an option on the form.
+        # Done before the runs go in, so a value the sheet has just introduced
+        # is offered by the dropdown rather than leaving the run it arrived on
+        # impossible to edit. The importer itself does not validate against the
+        # list - its job is to reproduce the sheet - so this is the one place
+        # the two are reconciled.
+        registered = {
+            kind: run_options.register(conn, kind, [e[kind] for e in entries])
+            for kind in run_options.KINDS
+        }
+
         if rebuild:
             # run_bests goes with it through ON DELETE CASCADE.
             conn.execute("DELETE FROM runs WHERE source = 'strava'")
@@ -328,6 +339,7 @@ def run_import(source: Path | None = None, sheet: str | None = None,
         "rows_missing_a_date_format": unformatted,
         "runs_the_sheet_could_not_classify":
             sum(1 for e in entries if not e["classified"]),
+        "options_registered": {k: v for k, v in registered.items() if v},
         "interval_sessions_kept": restored,
         "interval_sessions_orphaned": orphaned,
         "first_day": days[0].isoformat() if days else None,

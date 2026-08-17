@@ -71,6 +71,7 @@ def init_db(db_path: Path | None = None) -> None:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _add_missing_columns(conn)
         _convert_interval_splits(conn)
+        _seed_run_options(conn)
     finally:
         conn.close()
 
@@ -152,6 +153,45 @@ def _convert_interval_splits(conn: sqlite3.Connection) -> int:
             f"interval_split_s: {converted} row(s) converted"
             + (", column dropped" if dropped else ", column left in place"))
     return converted
+
+
+def _seed_run_options(conn: sqlite3.Connection) -> list:
+    """Fill the dropdown lists on first start. Never touches them again.
+
+    Two sources, in this order: the lists in config.py, which are the
+    vocabulary the spreadsheet was written in, and then anything the runs
+    already in the database use that those lists do not mention. The second
+    half is what matters on an existing deployment - the imported history
+    contains an 'Unclassified' run, from a row the source sheet could not
+    classify, and a dropdown that omitted it would make that run uneditable.
+
+    Only ever runs against an empty table, so editing the lists on the Admin
+    page is not undone by the next restart, and removing an option does not
+    bring it back.
+    """
+    if conn.execute("SELECT COUNT(*) FROM run_options").fetchone()[0]:
+        return []
+
+    seeded = []
+    for kind, defaults in (("run_type", config.RUN_TYPES),
+                           ("effort_type", config.EFFORT_TYPES)):
+        # Busiest first among the extras, so a type used by forty runs is not
+        # left below one used by a single run.
+        used = [row[0] for row in conn.execute(
+            f"SELECT {kind} FROM runs WHERE {kind} IS NOT NULL AND {kind} <> '' "
+            f"GROUP BY {kind} ORDER BY COUNT(*) DESC, {kind}")]
+        ordered, seen = [], set()
+        for value in list(defaults) + used:
+            if value.casefold() not in seen:
+                ordered.append(value)
+                seen.add(value.casefold())
+        conn.executemany(
+            "INSERT INTO run_options (kind, value, position) VALUES (?, ?, ?)",
+            [(kind, value, index) for index, value in enumerate(ordered)])
+        seeded.append(f"{kind}: {len(ordered)}")
+
+    log(conn, "migrate", "run_options", None, "seeded " + ", ".join(seeded))
+    return seeded
 
 
 @contextmanager

@@ -155,6 +155,31 @@ GROUP BY period;
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
+-- The values the Run type and Effort type dropdowns offer, in the order they
+-- offer them.
+--
+-- In the database rather than in config.py because they are data, not code: a
+-- new kind of session should be something added on the Admin page, not
+-- something that needs a code edit, a push to the NAS and a restart. config.py
+-- keeps a list of each, but only as the seed for a database that has none -
+-- see core/db.py _seed_run_options, which also picks up anything the imported
+-- runs already use.
+--
+-- `runs.run_type` and `runs.effort_type` stay plain TEXT rather than becoming
+-- foreign keys into this. A key would be the tidier schema and the wrong
+-- trade: the runs are the record of what happened and this is a convenience
+-- for a form, and the day the two disagree it should be the dropdown that is
+-- wrong, not the history. core/run_options.py holds the rule that keeps them
+-- in step - an option in use cannot be removed.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS run_options (
+    kind     TEXT    NOT NULL CHECK (kind IN ('run_type', 'effort_type')),
+    value    TEXT    NOT NULL CHECK (length(trim(value)) > 0),
+    position INTEGER NOT NULL,
+    PRIMARY KEY (kind, value)
+);
+
+-- ---------------------------------------------------------------------------
 -- One row per run.
 --
 -- `duration_s` rather than a time string: the sheet stored elapsed time as an

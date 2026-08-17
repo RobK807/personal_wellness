@@ -36,3 +36,6 @@ venv/
 # PyCharm's per-machine project state. Nothing in it describes the project in a
 # way another machine would want.
 .idea/
+
+# All excel versions are stored in a temporary folder that shouldn't be committedd
+excel_versions/
