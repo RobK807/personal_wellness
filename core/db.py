@@ -72,6 +72,7 @@ def init_db(db_path: Path | None = None) -> None:
         _add_missing_columns(conn)
         _convert_interval_splits(conn)
         _seed_run_options(conn)
+        _seed_exercises(conn)
     finally:
         conn.close()
 
@@ -192,6 +193,30 @@ def _seed_run_options(conn: sqlite3.Connection) -> list:
 
     log(conn, "migrate", "run_options", None, "seeded " + ", ".join(seeded))
     return seeded
+
+
+def _seed_exercises(conn: sqlite3.Connection) -> list:
+    """Fill the exercise catalogue on first start, from config.
+
+    Same rule as the dropdown lists above: only ever against an empty table, so
+    editing the catalogue in the app is not undone by the next restart and a
+    retired movement does not come back. The seed is the vocabulary of the gym
+    workbook - see config.WORKOUT_EXERCISES.
+    """
+    if conn.execute("SELECT COUNT(*) FROM exercises").fetchone()[0]:
+        return []
+    added = []
+    for position, (name, per_side, per_dumbbell, bodyweight) in enumerate(
+            config.WORKOUT_EXERCISES, start=1):
+        conn.execute(
+            "INSERT INTO exercises (name, reps_mode, weight_mode, "
+            "is_bodyweight, position) VALUES (?, ?, ?, ?, ?)",
+            (name, "per_side" if per_side else "total",
+             "per_dumbbell" if per_dumbbell else "total",
+             1 if bodyweight else 0, position))
+        added.append(name)
+    log(conn, "migrate", "exercises", None, f"seeded {len(added)} exercises")
+    return added
 
 
 @contextmanager

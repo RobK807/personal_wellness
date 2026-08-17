@@ -1,0 +1,21 @@
+{# The plan picker, on every page in this section. Historic plans are found
+   here: the dropdown lists every plan ever saved, newest first. #}
+<form class="filters" method="get" action="{{ url_for(current) }}">
+  <div class="field">
+    <label for="plan">Plan</label>
+    <select id="plan" name="plan" onchange="this.form.submit()">
+      {% for option in plans %}
+      <option value="{{ option.id }}" {{ 'selected' if plan and option.id == plan.id }}>
+        {{ option.name }}{{ ' (archived)' if option.archived }}
+        — {{ option.weeks }} wk, {{ option.sessions_done }}/{{ option.sessions }} done
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <p class="actions">
+    <noscript><button type="submit">Show</button></noscript>
+    <a class="button small" href="{{ url_for('workouts.plan', plan=plan.id if plan) }}">Plan</a>
+    <a class="button small" href="{{ url_for('workouts.tracker', plan=plan.id if plan) }}">Tracker</a>
+    <a class="button small" href="{{ url_for('workouts.exercises') }}">Exercises</a>
+  </p>
+</form>

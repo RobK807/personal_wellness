@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit session' if editing else 'Build a session' }} · {{ plan.name }}{% endblock %}
+
+{# Whatever was typed, then whatever the session already holds, then blank. #}
+{% macro value(name, fallback='') -%}
+{{ form[name] if form and form.get(name) is not none else fallback }}
+{%- endmacro %}
+
+{# The sets a slot already holds, split by type so the form can be laid out the
+   way the workbook is: warm-ups prescribed one at a time, then a block. #}
+{% macro slot_sets(item, kind) %}{% if item %}{{ item.sets | selectattr('set_type', 'equalto', kind) | list | length }}{% endif %}{% endmacro %}
+
+{% block content %}
+<h1>{{ 'Edit session' if editing else 'Build a session' }}</h1>
+<p class="caption">
+  {{ plan.name }} · {{ week | weektitle }}
+  {%- if week.phase_name %} · {{ week.phase_name }}{% endif %} ·
+  <a href="{{ url_for('workouts.week', week_id=week.id) }}">back to the week</a>
+</p>
+
+{% if phase %}
+<p class="flash flash-ok">
+  <strong>{{ phase.name }}</strong> prescribes warm-ups at
+  {{ phase.warmup_pcts | pcts }}, working sets at {{ phase.working_pcts | pcts }},
+  {{ phase.working_sets or '?' }} × {{ phase.working_reps or '?' }} reps, and
+  accessories {{ phase.accessory_sets or '?' }} × {{ phase.accessory_reps or '?' }}.
+  The boxes below start there; change any of them.
+</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('workouts.build', week=week.id, session=editing.id if editing else none) }}">
+  <div class="card">
+    <h3>The session</h3>
+    <div class="row three">
+      <div class="field">
+        <label for="number">Number in the week</label>
+        <input type="text" inputmode="numeric" id="number" name="number" required
+               value="{{ value('number', editing.number if editing else next_number) }}">
+      </div>
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name"
+               placeholder="leave blank to name it after its main lifts"
+               value="{{ value('name', editing.name if editing and editing.name else '') }}">
+      </div>
+      <div class="field">
+        <label for="note">Note</label>
+        <input type="text" id="note" name="note"
+               value="{{ value('note', editing.note if editing and editing.note else '') }}">
+      </div>
+    </div>
+    <p class="small muted">A blank name reads as the movements carrying working
+      sets — <em>Bench Press + Squats</em> — which is what the workbook does and
+      what leaves the accessories out of the title.</p>
+  </div>
+
+  {% for slot in slots %}
+  {% set item = sheet[slot - 1] if sheet | length >= slot else none %}
+  {% set warm = item.sets | selectattr('set_type', 'equalto', 'warmup') | list if item else [] %}
+  {% set work = item.sets | selectattr('set_type', 'equalto', 'working') | list if item else [] %}
+  {% set acc  = item.sets | selectattr('set_type', 'equalto', 'accessory') | list if item else [] %}
+  <details class="panel" {{ 'open' if item or slot == (sheet | length) + 1 }}>
+    <summary>Exercise {{ slot }}{% if item %} — {{ item.name }}{% endif %}</summary>
+    <div>
+      <div class="row three">
+        <div class="field">
+          <label for="ex{{ slot }}_id">Movement</label>
+          <select id="ex{{ slot }}_id" name="ex{{ slot }}_id">
+            <option value="">— none, skip this slot —</option>
+            {% for row in catalogue %}
+            <option value="{{ row.id }}"
+              {{ 'selected' if item and row.id == item.exercise_id }}>
+              {{ row.name }}{% if row.is_bodyweight %} (bodyweight){% endif %}
+              {%- if maxes.get(row.id) %} · 1RM {{ maxes[row.id] | kg }} kg{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_reps_mode">Reps counted</label>
+          <select id="ex{{ slot }}_reps_mode" name="ex{{ slot }}_reps_mode">
+            <option value="">As the exercise says</option>
+            <option value="total" {{ 'selected' if item and item.reps_mode == 'total' }}>Total</option>
+            <option value="per_side" {{ 'selected' if item and item.reps_mode == 'per_side' }}>Per side</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_weight_mode">Weight counted</label>
+          <select id="ex{{ slot }}_weight_mode" name="ex{{ slot }}_weight_mode">
+            <option value="">As the exercise says</option>
+            <option value="total" {{ 'selected' if item and item.weight_mode == 'total' }}>Total</option>
+            <option value="per_dumbbell" {{ 'selected' if item and item.weight_mode == 'per_dumbbell' }}>Per dumbbell</option>
+          </select>
+        </div>
+      </div>
+
+      <h4>Warm-up sets</h4>
+      <p class="small muted">Up to {{ warmups | length }}, each prescribed on its
+        own. Leave a row blank to skip it.</p>
+      {% for index in warmups %}
+      {% set row = warm[index - 1] if warm | length >= index else none %}
+      <div class="row three">
+        <div class="field">
+          <label for="ex{{ slot }}_w{{ index }}_reps">W{{ index }} reps</label>
+          <input type="text" id="ex{{ slot }}_w{{ index }}_reps"
+                 name="ex{{ slot }}_w{{ index }}_reps"
+                 value="{{ row.reps_low if row else '' }}" placeholder="5">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_w{{ index }}_mode">Weight from</label>
+          <select id="ex{{ slot }}_w{{ index }}_mode" name="ex{{ slot }}_w{{ index }}_mode">
+            <option value="">— no set —</option>
+            {% for mode in load_modes %}
+            <option value="{{ mode }}" {{ 'selected' if row and row.load_mode == mode }}>
+              {{ load_mode_labels[mode] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Value</label>
+          <div style="display:flex;gap:.3rem">
+            <input type="text" name="ex{{ slot }}_w{{ index }}_pct" placeholder="% e.g. 50"
+                   value="{{ (row.percent_1rm * 100) | round | int if row and row.percent_1rm else '' }}">
+            <input type="text" name="ex{{ slot }}_w{{ index }}_kg" placeholder="kg"
+                   value="{{ row.weight_kg | kg if row and row.weight_kg else '' }}">
+            <input type="text" name="ex{{ slot }}_w{{ index }}_added" placeholder="+kg"
+                   value="{{ row.added_kg | kg if row and row.added_kg else '' }}">
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      <div class="row two">
+        <div class="field">
+          <label for="ex{{ slot }}_w_rest">Warm-up rest</label>
+          <input type="text" id="ex{{ slot }}_w_rest" name="ex{{ slot }}_w_rest"
+                 list="rest-options"
+                 value="{{ warm[0].rest if warm else (phase.rest_warmup if phase else default_rest.warmup) }}">
+        </div>
+      </div>
+
+      <h4>Working sets</h4>
+      <div class="row three">
+        <div class="field">
+          <label for="ex{{ slot }}_working_sets">How many</label>
+          <input type="text" inputmode="numeric" id="ex{{ slot }}_working_sets"
+                 name="ex{{ slot }}_working_sets"
+                 value="{{ work | length if work else (phase.working_sets if phase and not item else '') }}"
+                 placeholder="5">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_working_reps">Reps each</label>
+          <input type="text" id="ex{{ slot }}_working_reps" name="ex{{ slot }}_working_reps"
+                 value="{{ (work[0].reps_high and (work[0].reps_low ~ '-' ~ work[0].reps_high) or work[0].reps_low) if work else (phase.working_reps if phase and not item else '') }}"
+                 placeholder="10">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_working_mode">Weight from</label>
+          <select id="ex{{ slot }}_working_mode" name="ex{{ slot }}_working_mode">
+            <option value="">— no working sets —</option>
+            {% for mode in load_modes %}
+            <option value="{{ mode }}"
+              {{ 'selected' if (work and work[0].load_mode == mode) or (not item and mode == 'percent') }}>
+              {{ load_mode_labels[mode] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row three">
+        <div class="field">
+          <label>Value</label>
+          <div style="display:flex;gap:.3rem">
+            <input type="text" name="ex{{ slot }}_working_pct" placeholder="% e.g. 65"
+                   value="{{ (work[0].percent_1rm * 100) | round | int if work and work[0].percent_1rm else '' }}">
+            <input type="text" name="ex{{ slot }}_working_kg" placeholder="kg"
+                   value="{{ work[0].weight_kg | kg if work and work[0].weight_kg else '' }}">
+            <input type="text" name="ex{{ slot }}_working_added" placeholder="+kg"
+                   value="{{ work[0].added_kg | kg if work and work[0].added_kg else '' }}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_working_rest">Rest</label>
+          <input type="text" id="ex{{ slot }}_working_rest" name="ex{{ slot }}_working_rest"
+                 list="rest-options"
+                 value="{{ work[0].rest if work else (phase.rest_working if phase else default_rest.working) }}">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_working_cue">Cue</label>
+          <input type="text" id="ex{{ slot }}_working_cue" name="ex{{ slot }}_working_cue"
+                 list="cue-options" value="{{ work[0].cue if work and work[0].cue else '' }}">
+        </div>
+      </div>
+
+      <h4>Accessory sets</h4>
+      <div class="row three">
+        <div class="field">
+          <label for="ex{{ slot }}_accessory_sets">How many</label>
+          <input type="text" inputmode="numeric" id="ex{{ slot }}_accessory_sets"
+                 name="ex{{ slot }}_accessory_sets"
+                 value="{{ acc | length if acc else '' }}" placeholder="3">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_accessory_reps">Reps each</label>
+          <input type="text" id="ex{{ slot }}_accessory_reps" name="ex{{ slot }}_accessory_reps"
+                 value="{{ (acc[0].reps_high and (acc[0].reps_low ~ '-' ~ acc[0].reps_high) or acc[0].reps_low) if acc else '' }}"
+                 placeholder="10-12">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_accessory_mode">Weight from</label>
+          <select id="ex{{ slot }}_accessory_mode" name="ex{{ slot }}_accessory_mode">
+            <option value="">— no accessory sets —</option>
+            {% for mode in load_modes %}
+            <option value="{{ mode }}"
+              {{ 'selected' if acc and acc[0].load_mode == mode }}>
+              {{ load_mode_labels[mode] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row three">
+        <div class="field">
+          <label>Value</label>
+          <div style="display:flex;gap:.3rem">
+            <input type="text" name="ex{{ slot }}_accessory_pct" placeholder="%"
+                   value="{{ (acc[0].percent_1rm * 100) | round | int if acc and acc[0].percent_1rm else '' }}">
+            <input type="text" name="ex{{ slot }}_accessory_kg" placeholder="kg"
+                   value="{{ acc[0].weight_kg | kg if acc and acc[0].weight_kg else '' }}">
+            <input type="text" name="ex{{ slot }}_accessory_added" placeholder="+kg"
+                   value="{{ acc[0].added_kg | kg if acc and acc[0].added_kg else '' }}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_accessory_rest">Rest</label>
+          <input type="text" id="ex{{ slot }}_accessory_rest" name="ex{{ slot }}_accessory_rest"
+                 list="rest-options"
+                 value="{{ acc[0].rest if acc else (phase.rest_accessory if phase else default_rest.accessory) }}">
+        </div>
+        <div class="field">
+          <label for="ex{{ slot }}_accessory_cue">Cue</label>
+          <input type="text" id="ex{{ slot }}_accessory_cue" name="ex{{ slot }}_accessory_cue"
+                 list="cue-options" value="{{ acc[0].cue if acc and acc[0].cue else '' }}">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="ex{{ slot }}_note">Note for this exercise</label>
+        <input type="text" id="ex{{ slot }}_note" name="ex{{ slot }}_note"
+               value="{{ item.note if item and item.note else '' }}">
+      </div>
+    </div>
+  </details>
+  {% endfor %}
+
+  <datalist id="rest-options">
+    {% for option in rest_options %}<option value="{{ option }}">{% endfor %}
+  </datalist>
+  <datalist id="cue-options">
+    {% for option in cue_options %}<option value="{{ option }}">{% endfor %}
+  </datalist>
+
+  <p class="actions">
+    <button class="primary" type="submit">{{ 'Save changes' if editing else 'Save session' }}</button>
+    <a class="button" href="{{ url_for('workouts.week', week_id=week.id) }}">Cancel</a>
+  </p>
+  <p class="small muted">Only the three value boxes matching the chosen
+    <em>Weight from</em> are read; the others are ignored. A percentage of a
+    bodyweight movement is refused — it has no 1RM to take a percentage of.</p>
+</form>
+{% endblock %}

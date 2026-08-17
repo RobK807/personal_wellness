@@ -32,7 +32,9 @@ PAGES = {
     ],
     "workouts": [
         ("workouts.plan",        "Plan",     "Plan"),
+        ("workouts.build",       "Build",    "Build a session"),
         ("workouts.tracker",     "Track",    "Tracker"),
+        ("workouts.exercises",   "Moves",    "Exercises"),
     ],
     "diet": [
         ("diet.log",             "Log",      "Log"),

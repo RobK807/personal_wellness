@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Workout plan{% endblock %}
+
+{% block content %}
+<h1>Workout plan</h1>
+<p class="caption">Nothing here yet. A plan is a programme with a name — phases,
+  weeks, sessions and the sets inside them — and there are two ways to get one.</p>
+
+<div class="card">
+  <h3>Import the gym workbook</h3>
+  <p class="small">One plan per workbook, read strictly read-only. The
+    percentages are imported and the weights beside them are checked rather than
+    copied, so the plan cannot disagree with itself.</p>
+  <pre>python -m core.gym_import              # add it
+python -m core.gym_import --rebuild   # replace what is there</pre>
+  <p class="small muted">Looking for <code>{{ workbook }}</code>. Run it on a
+    desktop: openpyxl opening a workbook needs more memory than the NAS has
+    free.</p>
+</div>
+
+<div class="card">
+  <h3>Or start one by hand</h3>
+  <form method="post" action="{{ url_for('workouts.save_plan') }}">
+    <div class="row three">
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+               placeholder="2026 Gym Programme">
+      </div>
+      <div class="field">
+        <label for="started_on">Started</label>
+        <input type="date" id="started_on" name="started_on">
+      </div>
+      <div class="field">
+        <label for="rounding_kg">Round weights to</label>
+        <input type="text" inputmode="decimal" id="rounding_kg"
+               name="rounding_kg" value="2.5" placeholder="2.5">
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Create plan</button></p>
+  </form>
+  <p class="small muted">The catalogue already holds
+    {{ exercises }} exercises, taken from the workbook — add to it on the
+    <a href="{{ url_for('workouts.exercises') }}">Exercises</a> page.</p>
+</div>
+{% endblock %}

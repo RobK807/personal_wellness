@@ -44,8 +44,10 @@ PAGES = [
     ("views.runs.records",          "render"),
     ("views.runs.data_page",        "render"),
     ("views.runs.admin_page",       "render"),
-    ("views.placeholders",          "workout_plan"),
-    ("views.placeholders",          "workout_tracker"),
+    ("views.workouts.plan_page",      "render"),
+    ("views.workouts.build_page",     "render"),
+    ("views.workouts.tracker_page",   "render"),
+    ("views.workouts.exercises_page", "render"),
     ("views.placeholders",          "diet_log"),
     ("views.placeholders",          "diet_analysis"),
 ]
@@ -54,6 +56,49 @@ PAGES = [
 def _clear(path: Path) -> None:
     for suffix in ("", "-wal", "-shm"):
         Path(str(path) + suffix).unlink(missing_ok=True)
+
+
+def _seed_workouts() -> None:
+    """A small plan, so the workout pages render with something in them.
+
+    The real database has no plans - the section is new - and four pages that
+    only ever draw their empty state are four pages nobody has tested. One week
+    of two sessions exercises every branch: a percentage set, a bodyweight set,
+    an unprescribed accessory, and a tick-off.
+    """
+    from core import workout_mutations as wm, workout_queries as wq
+
+    if wq.total_plans():
+        return
+    plan = wm.save_plan({"name": "Streamlit fixture", "rounding_kg": 2.5})
+    phase = wm.save_phase(plan["id"], {
+        "name": "Phase 1", "focus": "Hypertrophy", "warmup_pcts": "50, 70",
+        "working_pcts": "65", "working_sets": 5, "working_reps": "10",
+        "accessory_sets": 3, "accessory_reps": "10-12"})
+    week = wm.save_week(plan["id"], {"number": 1, "cycle_type": "A",
+                                     "phase_id": phase["id"],
+                                     "note": "Technique first."})
+    lookup = {row["name"]: row["id"] for row in wq.exercises()}
+    wm.set_max(plan["id"], lookup["Bench Press"], 95)
+
+    first = wm.save_session(week["id"], {"number": 1}, [
+        {"exercise_id": lookup["Bench Press"], "sets":
+            [{"set_type": "warmup", "reps": "5", "load_mode": "percent",
+              "percent_1rm": "50", "rest": "60s"}]
+            + [{"set_type": "working", "reps": "10", "load_mode": "percent",
+                "percent_1rm": "65", "rest": "2-3 min", "cue": "Log RPE"}
+               for _ in range(5)]},
+        {"exercise_id": lookup["Pull-Ups"], "sets":
+            [{"set_type": "working", "reps": "8-10", "load_mode": "bodyweight",
+              "added_kg": "5", "rest": "2-3 min"} for _ in range(3)]},
+    ])
+    wm.save_session(week["id"], {"number": 2}, [
+        {"exercise_id": lookup["Goblet Squat"], "sets":
+            [{"set_type": "accessory", "reps": "12", "load_mode": "choose",
+              "rest": "60-90s", "cue": "Control tempo 3-1-1"}
+             for _ in range(3)]},
+    ])
+    wm.tick_session(first["id"], True)
 
 
 def _render_all(db_path: Path, label: str, root: str) -> list:
@@ -69,6 +114,8 @@ def _render_all(db_path: Path, label: str, root: str) -> list:
 
     from core import db
     db.init_db()
+    if label.startswith("With data"):
+        _seed_workouts()
 
     print(f"\n{label} — {db_path}")
     failures = []

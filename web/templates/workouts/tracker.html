@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Tracker · {{ plan.name }}{% endblock %}
+
+{% block content %}
+<h1>Tracker</h1>
+{% include "workouts/_picker.html" %}
+
+<div class="metrics">
+  <div class="metric"><span class="label">Sessions done</span>
+    <span class="value">{{ totals.sessions_done }}</span>
+    <span class="unit">of {{ totals.sessions }}</span></div>
+  <div class="metric"><span class="label">Through</span>
+    <span class="value">{{ '%.0f'|format(totals.progress * 100) }}</span>
+    <span class="unit">%</span></div>
+  <div class="metric"><span class="label">Weeks</span>
+    <span class="value">{{ totals.weeks }}</span></div>
+  <div class="metric"><span class="label">Prescribed sets</span>
+    <span class="value">{{ totals.sets }}</span></div>
+</div>
+
+{% if next_up %}
+<div class="card">
+  <h3>Next up — week {{ next_up.week_number }}, {{ next_up | sessiontitle }}</h3>
+  <form method="post" action="{{ url_for('workouts.tick', session_id=next_up.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('workouts.tracker', plan=plan.id) }}">
+    <div class="row three">
+      <div class="field">
+        <label for="done_on">Done on</label>
+        <input type="date" id="done_on" name="done_on" value="{{ today.isoformat() }}"
+               max="{{ today.isoformat() }}">
+      </div>
+      <div class="field">
+        <label for="tick_note">How it went</label>
+        <input type="text" id="tick_note" name="note" placeholder="optional">
+      </div>
+    </div>
+    <p class="actions">
+      <button class="primary" type="submit">Tick it off</button>
+      <a class="button" href="{{ url_for('workouts.week', week_id=next_up.week_id) }}">See the session</a>
+    </p>
+  </form>
+</div>
+{% else %}
+<p class="flash flash-ok">Every session in this plan is ticked off. Copy it as a
+  template on the <a href="{{ url_for('workouts.plan', plan=plan.id) }}">Plan
+  page</a> to start the next block.</p>
+{% endif %}
+
+<h2>Every week</h2>
+<p class="caption">The workbook's Tracker sheet: a row per week, a tick per
+  session. Ticking a whole week is one button; ticking one session is the button
+  beside it.</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th class="num">Week</th><th>Phase</th><th>Type</th>
+          <th>Sessions</th><th class="num">Done</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in progress %}
+      <tr {{ 'class=done' if row.complete }}>
+        <td class="num"><a href="{{ url_for('workouts.week', week_id=row.week_id) }}">
+          <strong>{{ row.number }}</strong></a>{{ ' ' ~ row.label if row.label }}</td>
+        <td class="small">{{ row.phase_name or '' }}</td>
+        <td class="small muted">{{ row.cycle_type or '' }}</td>
+        <td>
+          {% for session in sessions if session.week_id == row.week_id %}
+          <form method="post" style="display:inline"
+                action="{{ url_for('workouts.tick', session_id=session.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('workouts.tracker', plan=plan.id) }}">
+            <input type="hidden" name="done" value="{{ '0' if session.done else '1' }}">
+            <button class="small {{ 'primary' if session.done }}" type="submit"
+                    title="{{ session | sessiontitle }}{{ ' — done ' ~ session.done_on if session.done }}">
+              {{ '✓' if session.done else '○' }} S{{ session.number }}</button>
+          </form>
+          {% endfor %}
+        </td>
+        <td class="num">{{ row.sessions_done }}/{{ row.sessions }}</td>
+        <td>
+          <form method="post" action="{{ url_for('workouts.tick_week', week_id=row.week_id) }}">
+            <input type="hidden" name="next" value="{{ url_for('workouts.tracker', plan=plan.id) }}">
+            <input type="hidden" name="done" value="{{ '0' if row.complete else '1' }}">
+            <button class="small" type="submit">{{ 'Clear' if row.complete else 'All' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No weeks in this plan yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if recent %}
+<h2>Recently done</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Date</th><th class="num">Week</th><th>Session</th><th>Note</th></tr></thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td class="day">{{ row.done_on | period }}</td>
+        <td class="num">{{ row.week_number }}</td>
+        <td>{{ row | sessiontitle }}</td>
+        <td class="small muted">{{ row.done_note or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if volume %}
+<h2>Volume done, by movement</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Exercise</th><th class="num">Sets</th><th class="num">Reps</th>
+          <th class="num">Volume</th><th class="num">Sets with no weight</th></tr>
+    </thead>
+    <tbody>
+      {% for row in volume %}
+      <tr>
+        <td>{{ row.exercise_name }}</td>
+        <td class="num">{{ row.sets }}</td>
+        <td class="num">{{ row.reps }}</td>
+        <td class="num">{{ row.volume_kg | kg }} kg</td>
+        <td class="num {{ 'muted' if not row.sets_without_weight }}">
+          {{ row.sets_without_weight or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">Prescribed volume for the sessions ticked off — sets × reps ×
+  weight, doubled where the weight is per dumbbell or the reps are per side.
+  Warm-ups are left out, because they are not the work. <em>Sets with no
+  weight</em> counts the ones the plan leaves to the day, so the total is never
+  quietly short without saying so.</p>
+{% endif %}
+{% endblock %}

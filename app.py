@@ -23,6 +23,10 @@ from views.runs import (admin_page as runs_admin, analysis as runs_analysis,
                         overview as runs_overview, records as runs_records)
 from views.weigh_in import (admin_page, changes_page, charts_page, data_page,
                             input_page, overview)
+from views.workouts import (build_page as workouts_build,
+                            exercises_page as workouts_exercises,
+                            plan_page as workouts_plan,
+                            tracker_page as workouts_tracker)
 
 st.set_page_config(
     page_title=config.APP_TITLE,
@@ -61,8 +65,10 @@ PAGES = {
         ("Admin",     ":material/settings:",      "runs-admin",       runs_admin.render),
     ],
     "workouts": [
-        ("Plan",     ":material/calendar_month:", "workouts",         placeholders.workout_plan),
-        ("Tracker",  ":material/fitness_center:", "workouts-track",   placeholders.workout_tracker),
+        ("Plan",      ":material/calendar_month:", "workouts",           workouts_plan.render),
+        ("Build",     ":material/construction:",   "workouts-build",     workouts_build.render),
+        ("Tracker",   ":material/fitness_center:", "workouts-track",     workouts_tracker.render),
+        ("Exercises", ":material/list:",           "workouts-exercises", workouts_exercises.render),
     ],
     "diet": [
         ("Log",      ":material/restaurant:",     "diet",             placeholders.diet_log),

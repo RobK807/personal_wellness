@@ -2,9 +2,9 @@
 
 Four trackers behind one sidebar, on one database, with two front-ends over the
 top. The **weigh-in tracker** is the standalone app of the same name, moved in
-whole; the **run tracker** is new, built from seven years of runs scraped off
-Strava; the **workout plan** and the **diet tracker** are placeholders with
-nothing behind them yet, and say so.
+whole; the **run tracker** is built from seven years of runs scraped off
+Strava; the **workout tracker** is built from the gym programme workbook; the
+**diet tracker** is a placeholder with nothing behind it yet, and says so.
 
 Built the same way as the CD dashboard next door: one shared `core` package, a
 **Flask** front-end light enough to run on the NAS, and a **Streamlit** one for
@@ -14,11 +14,12 @@ a machine with memory to spare.
 pip install -r requirements.txt
 python -m core.excel_import --rebuild     # the weigh-in history, once
 python -m core.strava_import --rebuild    # the runs, once
+python -m core.gym_import                 # the gym programme, once
 python serve.py                           # Flask, http://localhost:8503
 streamlit run app.py                      # Streamlit, same data
 ```
 
-Both importers need a desktop — openpyxl opening a 1.5 MB workbook needs far
+All three importers need a desktop — openpyxl opening a 1.5 MB workbook needs far
 more memory than the NAS has free. Everything else runs anywhere.
 
 ---
@@ -34,8 +35,8 @@ navigations that can drift apart.
 | --- | --- |
 | ⚖️ **Weigh-in tracker** | Six years of weigh-ins, unchanged. [What it does](#the-weigh-in-tracker) |
 | 🏃 **Run tracker** | 229 runs, 1,542 best efforts. [What it does](#the-run-tracker) |
-| 🏋️ **Workout plan** | Placeholder. [Why there is no schema yet](#the-two-that-are-not-built) |
-| 🥗 **Diet tracker** | Placeholder. Same. |
+| 🏋️ **Workout plan** | 19 weeks, 38 sessions, 564 sets. [What it does](#the-workout-tracker) |
+| 🥗 **Diet tracker** | Placeholder. [Why there is no schema yet](#the-one-that-is-not-built) |
 
 ---
 
@@ -341,17 +342,128 @@ python run_test.py
 
 ---
 
-## The two that are not built
+## The workout tracker
 
-There are no workout or diet tables in `core/schema.sql`, deliberately. Guessing
-at a schema for a tracker that has not been designed is expensive to undo once
-there is data in it, and the run tracker shows what designed looks like — a
-ladder of best efforts is a very particular shape, and it came from knowing what
-the sheet held.
+Built from `2026 Gym Programme.xlsx` — an 18-week powerlifting block plus a
+deload week, three phases, a rotating pairing of lifts, and a tick per workout.
+`python -m core.gym_import` folds it into one plan: **19 weeks, 38 sessions, 116
+exercises, 564 sets**, with weeks 1–10 already ticked off.
 
-Each placeholder page lists what has to be decided first, and the order things
-get built in. The sections already exist in `config.SECTIONS`, so both
-front-ends already have the sidebar entry.
+### The shape
+
+```
+plan          a programme with a name — "2026 Gym Programme"
+ phase        a stretch of weeks sharing a set/rep scheme and a working %
+ week         numbered within the plan, belonging to one phase
+  session     up to 10 exercises; two per week in the workbook
+   exercise   one movement, in order, from the catalogue
+    set       one line of the sheet: type, reps, weight, rest, cue
+```
+
+**A cycle is not a level.** The workbook's six-week rotation is six week shapes
+that repeat, and the weeks are still numbered 1–19 — so a cycle is a pattern you
+copy, which `weeks.cycle_type` labels, rather than a container that would then
+have to be kept in step with the numbering. Build week 1, copy it into weeks 7
+and 13, change the percentages.
+
+### Prescribing a weight
+
+Four ways, because the workbook uses all four:
+
+| mode | column used | reads as |
+| --- | --- | --- |
+| `explicit` | `weight_kg` | `87.5 kg` |
+| `percent` | `percent_1rm` | `65% — 62.5 kg` |
+| `bodyweight` | `added_kg` | `Bodyweight`, `Bodyweight +10 kg` |
+| `choose` | none | `Choose weight` |
+
+Pull-Ups and Tricep Dips are main lifts in half the sessions and neither has a
+1RM, which is why `bodyweight` exists; the accessories say *Choose weight* and
+mean it, which is why `choose` does. A percentage of a bodyweight movement is
+refused — it would be a percentage of nothing.
+
+**The kilograms are worked out, never stored.** `v_exercise_sets` turns a
+percentage into a weight: `% × 1RM`, rounded to the plan's step. That is the same
+rule the run tracker follows for pace, and it matters more here than it looks,
+because **the rounding has to happen in exactly one place**. SQLite's `ROUND` is
+half-away-from-zero and Python's `round()` is half-to-even, so 61.25 kg at a
+2.5 kg step is 62.5 to one and 60.0 to the other. `core.workouts.round_to()`
+reproduces SQLite's rule for the form's preview, and `workout_test.py` asserts
+the two agree — including on the exact half-way cases where they would not.
+
+**1RMs belong to the plan, not to you.** Retest, start the next programme with
+the new numbers, and last year's block still says what it said at the time. One
+global 1RM per lift would silently restate history as a percentage of a max that
+did not exist yet.
+
+### Reps, and what they are counted in
+
+Reps are a low and an optional high, so `10` and `10–12` are one column rather
+than a number and a string that only one of them parses. Whether they are **per
+side** and whether the weight is **per dumbbell** are properties of the movement
+— a Bulgarian split squat is per leg wherever it appears — so they live on the
+catalogue entry, with a nullable override on the session for the time it is done
+the other way round.
+
+That pair is also why the catalogue is asked for them at all: the sheet records
+`10 each leg` in passing and says nothing whatsoever about the weight, so `27.5`
+against an incline dumbbell press could be two 27.5s or one, and only you know.
+
+### Phases
+
+A phase carries defaults — warm-up percentages, working percentages, sets and
+reps, rest per set type — and the session builder pre-fills from whichever phase
+the week sits in. They are **defaults, not constraints**: once a set exists it
+carries its own percentage, and editing the phase afterwards does not reach back
+into sessions already built. A plan half-completed should not change shape
+because a later phase was re-planned.
+
+### The pages
+
+| | |
+| --- | --- |
+| **Plan** | Pick a plan, see its phases, 1RMs and weeks; copy it as a template |
+| **Build** | The session builder, one session at a time |
+| **Tracker** | Tick sessions off; the workbook's grid, a row per week |
+| **Exercises** | The movement catalogue behind every dropdown |
+
+The builder takes one session at a time on purpose. Generating a whole cycle from
+a form would need every variation expressed as parameters before you could see
+any of it; building one and copying the week gets there faster and shows you what
+you are getting.
+
+**Historic plans** are the dropdown at the top of every page — every plan ever
+saved, newest first, found by the name it was saved under. *Copy into a new plan*
+reproduces the phases, weeks, sessions and sets, and the 1RMs if you want them.
+It does **not** copy the tick-offs: a template is what you intend to do, and
+inheriting last block's completed sessions would be a lie about this one.
+
+### The catalogue
+
+A closed list, for the same reason the run types are. **Retire** takes a movement
+out of the dropdowns and leaves every plan using it reading exactly as it did;
+**Delete** is only offered for the ones no session has ever used, because
+anything else would leave a hole in a plan from two years ago.
+
+### What the import checks rather than imports
+
+The workbook's *Weight (kg)* column, wherever a percentage sits beside it. It is
+`% × 1RM` rounded to 2.5 and nothing else, so importing it would be storing a
+derived value. All 268 of those cells are recomputed and compared instead, and
+the import says either *every weight matches* or lists the ones that do not.
+
+---
+
+## The one that is not built
+
+There are no diet tables in `core/schema.sql`, deliberately. Guessing at a schema
+for a tracker that has not been designed is expensive to undo once there is data
+in it, and the run and workout trackers both show what designed looks like — a
+ladder of best efforts is a very particular shape, and so is a set, and both came
+from knowing what the sheet held.
+
+The placeholder pages list what has to be decided first. The section already
+exists in `config.SECTIONS`, so both front-ends already have the sidebar entry.
 
 ---
 
@@ -433,6 +545,7 @@ default 90-day view is about 60 KB.
 ```bash
 python reconcile_test.py    # every weigh-in figure against the workbook
 python run_test.py          # every run figure against the Strava sheet
+python workout_test.py      # every set and weight against the gym workbook
 python smoke_test.py        # the weigh-in write path, especially back-filling
 python web_test.py          # every Flask route, form and both navigations
 python streamlit_test.py    # every Streamlit page, with data and without

@@ -9,12 +9,17 @@ shell without treading on each other. The weigh-in tracker's WI_ names are
 still read as a fallback, so an existing NAS deployment keeps working while it
 is being migrated - see `_setting()`.
 
-The file is organised in four parts:
+The file is organised in five parts:
 
     paths and ports          shared by every section
     the sections             what the sidebar offers
     weigh-in tracker         the metrics, unchanged from the standalone app
     run tracker              the breakdown ladder, run types and effort types
+    workout tracker          set types, load modes and the exercise seed
+
+Two of those lists are seeds rather than live settings, and say so where they
+are defined: the run and effort types (now in `run_options`) and the exercise
+catalogue (now in `exercises`). Both are edited in the app.
 """
 from __future__ import annotations
 
@@ -306,4 +311,158 @@ INTERVAL_BOUNDS = {
 RUN_BOUNDS = {
     "distance_km": (0.1, 300.0),
     "duration_s":  (30, 48 * 3600),
+}
+
+
+# --------------------------------------------------------------------------- #
+# Workout plan and tracker
+# --------------------------------------------------------------------------- #
+# The gym workbook the section was built from. Importer only, and read-only, the
+# same as the other two. It sits in EXCEL_DIR with them.
+GYM_XLSX = Path(_setting("GYM_XLSX", str(EXCEL_DIR / "2026 Gym Programme.xlsx")))
+
+# A session's exercises, and a week's sessions. Ten each is the brief; the
+# workbook uses four and two.
+MAX_EXERCISES_PER_SESSION = 10
+MAX_SESSIONS_PER_WEEK = 10
+
+# Warm-up sets get their own cap because they are prescribed per set - weight and
+# reps for each - rather than as "n sets of this". Three is the brief and the
+# workbook uses two, or one in the deload week.
+MAX_WARMUP_SETS = 3
+
+# Phase 3 climbs 87/92/97% across its three week-pairs, which is what the
+# workbook's Weight 1/2/3 columns hold. It bounds a phase's percentage list.
+MAX_WORKING_WEIGHTS = 3
+
+# The three kinds of line on a week sheet. `accessory` is not "a working set on
+# a smaller lift" - it is prescribed differently, in sets and a rep range with
+# the weight left to the day, which is why it counts as its own type.
+SET_TYPES = ["warmup", "working", "accessory"]
+
+SET_TYPE_LABELS = {
+    "warmup": "Warm-up",
+    "working": "Working",
+    "accessory": "Accessory",
+}
+
+# What the sheet's Set # column reads: W1, W2 for warm-ups, then 1, 2, 3.
+SET_TYPE_PREFIX = {"warmup": "W", "working": "", "accessory": ""}
+
+# The four ways a weight is prescribed. See core/workouts.py parse_load() and
+# the note on exercise_sets in core/schema.sql for which column each one uses.
+LOAD_MODES = ["explicit", "percent", "bodyweight", "choose"]
+
+LOAD_MODE_LABELS = {
+    "explicit": "Weight in kg",
+    "percent": "% of 1RM",
+    "bodyweight": "Bodyweight (+ added)",
+    "choose": "Choose on the day",
+}
+
+# Whether a rep count is per side or altogether, and whether a weight is per
+# dumbbell or altogether. Properties of the movement - a Bulgarian split squat is
+# per leg wherever it appears - so they live on the catalogue entry, with a
+# per-session override for the times it is done the other way.
+REPS_MODES = ["total", "per_side"]
+WEIGHT_MODES = ["total", "per_dumbbell"]
+
+REPS_MODE_LABELS = {
+    "total": "Total reps",
+    "per_side": "Per side (each leg / arm)",
+}
+WEIGHT_MODE_LABELS = {
+    "total": "Total weight",
+    "per_dumbbell": "Per dumbbell",
+}
+
+# Rest, defaulted by set type so it is not typed 47 times a week. Free text
+# rather than seconds: the workbook says "2-3 min" and a range is the honest
+# answer for how long to sit down for.
+DEFAULT_REST = {
+    "warmup": "60s",
+    "working": "2-3 min",
+    "accessory": "60-90s",
+}
+
+# The offered rest values, in the order the workbook uses them. Free text on the
+# way in, so this is a list of suggestions rather than a closed set.
+REST_OPTIONS = ["60s", "60-90s", "2-3 min", "3-4 min"]
+
+# The per-set cues from the workbook. Also suggestions, for the same reason.
+CUE_OPTIONS = [
+    "Log RPE",
+    "Log reps completed",
+    "Control tempo 3-1-1",
+    "Crisp technique, no grinding",
+    "Light - just moving",
+]
+
+# What a plan's weights round to. 2.5 kg is the workbook's step and reproduces
+# every one of its numbers exactly; the rest are here because a gym with 1.25 kg
+# plates or a dumbbell rack in 5s is a real gym.
+DEFAULT_ROUNDING_KG = 2.5
+ROUNDING_STEPS = [1.0, 1.25, 2.5, 5.0]
+
+# The exercise catalogue as first seeded, taken from the gym workbook: the name,
+# whether reps are per side, whether the weight is per dumbbell, and whether it
+# has a bar to load at all. Only the seed - the catalogue lives in the
+# `exercises` table and is edited in the app, exactly as run_options is.
+#
+# The per-side and per-dumbbell flags are read off the movement rather than the
+# sheet, which records them only in passing ("10 each leg") and not at all for
+# the weight. They are the reason the flags are asked for: the sheet cannot say
+# whether "27.5" on an incline press means two 27.5s or one.
+#
+#   name,                                per_side, per_dumbbell, bodyweight
+WORKOUT_EXERCISES = [
+    # The four lifts with a 1RM.
+    ("Bench Press",                          False, False, False),
+    ("Squats",                               False, False, False),
+    ("Deadlift",                             False, False, False),
+    ("OHP",                                  False, False, False),
+    # Main lifts with no 1RM - these progress by added weight.
+    ("Pull-Ups",                             False, False, True),
+    ("Tricep Dips",                          False, False, True),
+    # Accessories.
+    ("Bulgarian Split Squat (Dumbbells)",    True,  True,  False),
+    ("Cable Chest Fly",                      False, False, False),
+    ("Cable Pull-Through",                   False, False, False),
+    ("Dumbbell Bicep Curl",                  False, True,  False),
+    ("Dumbbell Lateral Raise",               False, True,  False),
+    ("EZ Bar Curl",                          False, False, False),
+    ("Face Pull (Cable)",                    False, False, False),
+    ("Glute Bridge (Barbell)",               False, False, False),
+    ("Goblet Squat",                         False, False, False),
+    ("Good Morning (Barbell)",               False, False, False),
+    ("Hamstring Curl (Machine)",             False, False, False),
+    ("Incline Dumbbell Press",               False, True,  False),
+    ("Lat Pulldown (Machine)",               False, False, False),
+    ("Leg Press (Machine)",                  False, False, False),
+    ("Nordic Hamstring Curl",                False, False, True),
+    ("Romanian Deadlift (Barbell)",          False, False, False),
+    ("Seated Cable Row",                     False, False, False),
+    ("Walking Lunge (Dumbbells)",            True,  True,  False),
+]
+
+# Which of them the workbook gives a 1RM for, and the numbers it gives. Seeded
+# onto an imported plan; a plan built by hand asks for them.
+WORKOUT_ONE_RM_SEED = {
+    "Bench Press": 95.0,
+    "Squats": 135.0,
+    "Deadlift": 225.0,
+    "OHP": 55.0,
+}
+
+MAX_NAME_LENGTH = 60
+
+# Fat-finger guards, in the same spirit as RUN_BOUNDS. Wide enough that a real
+# session never trips one: 2 kg is a light dumbbell, 400 kg is a deadlift nobody
+# in this database is doing, and 250% of 1RM is a typo rather than a plan.
+WORKOUT_BOUNDS = {
+    "reps": (1, 200),
+    "weight_kg": (0.5, 400.0),
+    "percent_1rm": (0.05, 1.5),
+    "rounding_kg": (0.25, 10.0),
+    "one_rm_kg": (1.0, 500.0),
 }

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Exercises · Workout plan{% endblock %}
+
+{% block content %}
+<h1>Exercises</h1>
+<p class="caption">
+  The catalogue behind every dropdown in this section. A closed list, for the
+  same reason the run types are: a movement typed freely three different ways is
+  three movements as far as any total is concerned.
+</p>
+
+<div class="card">
+  <h3>Add an exercise</h3>
+  <form method="post" action="{{ url_for('workouts.exercises') }}">
+    <div class="row three">
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required
+               placeholder="Incline Dumbbell Press">
+      </div>
+      <div class="field">
+        <label for="reps_mode">Reps counted</label>
+        <select id="reps_mode" name="reps_mode">
+          {% for mode in reps_modes %}
+          <option value="{{ mode }}">{{ reps_mode_labels[mode] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="weight_mode">Weight counted</label>
+        <select id="weight_mode" name="weight_mode">
+          {% for mode in weight_modes %}
+          <option value="{{ mode }}">{{ weight_mode_labels[mode] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="row two">
+      <div class="field">
+        <label for="is_bodyweight">Bodyweight movement</label>
+        <select id="is_bodyweight" name="is_bodyweight">
+          <option value="">No — it has a 1RM</option>
+          <option value="1">Yes — progresses by added weight</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="note">Note</label>
+        <input type="text" id="note" name="note">
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Add</button></p>
+  </form>
+  <p class="small muted">A <strong>bodyweight</strong> movement has no 1RM, so
+    the builder offers it "Bodyweight (+ added)" instead of a percentage — and
+    refuses the percentage, which would be a percentage of nothing.</p>
+</div>
+
+<h2>The catalogue</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Exercise</th><th>Reps</th><th>Weight</th><th>Type</th>
+          <th class="num">Sessions</th><th>Note</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in catalogue %}
+      <tr {{ 'class=muted' if row.retired }}>
+        <td>
+          <form method="post" action="{{ url_for('workouts.exercises') }}"
+                style="display:flex;gap:.3rem;align-items:center">
+            <input type="hidden" name="exercise_id" value="{{ row.id }}">
+            <input type="text" name="name" value="{{ row.name }}" required>
+            <select name="reps_mode">
+              {% for mode in reps_modes %}
+              <option value="{{ mode }}" {{ 'selected' if row.reps_mode == mode }}>
+                {{ reps_mode_labels[mode] }}</option>
+              {% endfor %}
+            </select>
+            <select name="weight_mode">
+              {% for mode in weight_modes %}
+              <option value="{{ mode }}" {{ 'selected' if row.weight_mode == mode }}>
+                {{ weight_mode_labels[mode] }}</option>
+              {% endfor %}
+            </select>
+            <select name="is_bodyweight">
+              <option value="">Has a 1RM</option>
+              <option value="1" {{ 'selected' if row.is_bodyweight }}>Bodyweight</option>
+            </select>
+            <input type="hidden" name="note" value="{{ row.note or '' }}">
+            <button class="small" type="submit" name="action" value="save">Save</button>
+          </form>
+        </td>
+        <td class="small muted">{{ reps_mode_labels[row.reps_mode] }}</td>
+        <td class="small muted">{{ weight_mode_labels[row.weight_mode] }}</td>
+        <td class="small muted">{{ 'Bodyweight' if row.is_bodyweight else '' }}</td>
+        <td class="num">{{ row.sessions or '' }}</td>
+        <td class="small muted">{{ row.note or '' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('workouts.exercises') }}" style="display:inline">
+            <input type="hidden" name="exercise_id" value="{{ row.id }}">
+            {% if row.retired %}
+            <button class="small" type="submit" name="action" value="restore">Restore</button>
+            {% else %}
+            <button class="small" type="submit" name="action" value="retire">Retire</button>
+            {% endif %}
+            {% if not row.sessions %}
+            <button class="small danger" type="submit" name="action" value="delete"
+                    onclick="return confirm('Delete {{ row.name }}?')">Delete</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="caption">
+  <strong>Retire</strong> takes a movement out of the dropdowns and leaves every
+  plan using it reading exactly as it did. <strong>Delete</strong> only appears
+  for the ones no session has ever used — anything else would leave a hole in a
+  plan from two years ago.
+</p>
+{% endblock %}

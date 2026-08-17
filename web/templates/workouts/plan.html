@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} · Workout plan{% endblock %}
+
+{% block content %}
+<h1>{{ plan.name }}</h1>
+{% include "workouts/_picker.html" %}
+
+<div class="metrics">
+  <div class="metric"><span class="label">Weeks</span>
+    <span class="value">{{ totals.weeks }}</span></div>
+  <div class="metric"><span class="label">Sessions</span>
+    <span class="value">{{ totals.sessions }}</span></div>
+  <div class="metric"><span class="label">Done</span>
+    <span class="value">{{ totals.sessions_done }}</span>
+    <span class="unit">of {{ totals.sessions }}</span></div>
+  <div class="metric"><span class="label">Prescribed sets</span>
+    <span class="value">{{ totals.sets }}</span></div>
+</div>
+<p class="caption">
+  {{ '%.0f'|format(totals.progress * 100) }}% through.
+  {% if plan.started_on %}Started {{ plan.started_on | period }}. {% endif %}
+  Weights round to {{ plan.rounding_kg | kg }} kg.
+  {% if plan.note %}{{ plan.note }}{% endif %}
+</p>
+
+{% if without_max %}
+<p class="flash flash-warn">
+  {{ without_max | sum(attribute='sets') }} sets are a percentage of a 1RM this
+  plan does not have:
+  {% for row in without_max %}<strong>{{ row.exercise_name }}</strong>
+  ({{ row.sets }} sets, from week {{ row.first_week }}){{ ', ' if not loop.last }}{% endfor %}.
+  They show no weight until a 1RM is entered below.
+</p>
+{% endif %}
+
+<h2>One-rep maxes</h2>
+<div class="card">
+  <table class="compact">
+    <thead><tr><th>Lift</th><th class="num">1RM</th><th></th></tr></thead>
+    <tbody>
+      {% for row in maxes %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td class="num">{{ row.one_rm_kg | kg }} kg</td>
+        <td>
+          <form method="post" action="{{ url_for('workouts.save_max', plan_id=plan.id) }}"
+                style="display:flex;gap:.4rem">
+            <input type="hidden" name="exercise_id" value="{{ row.exercise_id }}">
+            <input type="text" inputmode="decimal" name="one_rm_kg"
+                   value="{{ row.one_rm_kg | kg }}" style="max-width:6rem">
+            <button class="small" type="submit">Save</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="muted">None yet — a percentage set needs one.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('workouts.save_max', plan_id=plan.id) }}">
+    <div class="row two">
+      <div class="field">
+        <label for="new_max_ex">Add a 1RM for</label>
+        <select id="new_max_ex" name="exercise_id" required>
+          {% for row in catalogue if not row.is_bodyweight %}
+          <option value="{{ row.id }}">{{ row.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="new_max_kg">Kilograms</label>
+        <input type="text" inputmode="decimal" id="new_max_kg" name="one_rm_kg"
+               required placeholder="95">
+      </div>
+    </div>
+    <p class="actions"><button type="submit">Add</button></p>
+  </form>
+  <p class="small muted">1RMs belong to this plan. Retest, start the next
+    programme with the new numbers, and this one still says what it said at the
+    time.</p>
+</div>
+
+<h2>Phases</h2>
+<div class="card">
+  <table class="compact">
+    <thead>
+      <tr><th>Phase</th><th>Focus</th><th class="num">Weeks</th>
+          <th>Warm-up</th><th>Working</th><th class="num">Sets × reps</th>
+          <th class="num">Accessories</th></tr>
+    </thead>
+    <tbody>
+      {% for row in phases %}
+      <tr>
+        <td><strong>{{ row.name }}</strong></td>
+        <td class="small">{{ row.focus or '' }}</td>
+        <td class="num">{{ row.weeks }}</td>
+        <td class="num">{{ row.warmup_pcts | pcts }}</td>
+        <td class="num">{{ row.working_pcts | pcts }}</td>
+        <td class="num">{{ row.working_sets or '-' }} × {{ row.working_reps or '-' }}</td>
+        <td class="num">{{ row.accessory_sets or '-' }} × {{ row.accessory_reps or '-' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">No phases — add one below.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<details class="panel">
+  <summary>Add or change a phase</summary>
+  <div>
+    <p class="small muted">Everything here is a default the session builder
+      pre-fills from. It is not a constraint: once a set exists it carries its
+      own percentage, and editing the phase afterwards does not reach back into
+      sessions already built.</p>
+    <form method="post" action="{{ url_for('workouts.save_phase', plan_id=plan.id) }}">
+      <div class="row three">
+        <div class="field">
+          <label for="ph_id">Phase</label>
+          <select id="ph_id" name="phase_id">
+            <option value="">New phase</option>
+            {% for row in phases %}<option value="{{ row.id }}">{{ row.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ph_name">Name</label>
+          <input type="text" id="ph_name" name="name" required placeholder="Phase 1">
+        </div>
+        <div class="field">
+          <label for="ph_focus">Focus</label>
+          <input type="text" id="ph_focus" name="focus" placeholder="Hypertrophy">
+        </div>
+      </div>
+      <div class="row three">
+        <div class="field">
+          <label for="ph_warm">Warm-up %</label>
+          <input type="text" id="ph_warm" name="warmup_pcts" placeholder="50, 70">
+        </div>
+        <div class="field">
+          <label for="ph_work">Working %</label>
+          <input type="text" id="ph_work" name="working_pcts" placeholder="65">
+        </div>
+        <div class="field">
+          <label for="ph_ws">Working sets × reps</label>
+          <div style="display:flex;gap:.4rem">
+            <input type="text" inputmode="numeric" name="working_sets" placeholder="5">
+            <input type="text" name="working_reps" placeholder="10">
+          </div>
+        </div>
+      </div>
+      <div class="row three">
+        <div class="field">
+          <label for="ph_as">Accessory sets × reps</label>
+          <div style="display:flex;gap:.4rem">
+            <input type="text" inputmode="numeric" name="accessory_sets" placeholder="3">
+            <input type="text" name="accessory_reps" placeholder="10-12">
+          </div>
+        </div>
+      </div>
+      <p class="actions"><button class="primary" type="submit">Save phase</button></p>
+    </form>
+  </div>
+</details>
+
+<h2>Weeks</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th class="num">#</th><th>Label</th><th>Phase</th><th>Type</th>
+          <th class="num">Sessions</th><th class="num">Done</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in weeks %}
+      <tr {{ 'class=done' if row.sessions and row.sessions == row.sessions_done }}>
+        <td class="num"><strong>{{ row.number }}</strong></td>
+        <td>{{ row.label or '' }}</td>
+        <td class="small">{{ row.phase_name or '' }}</td>
+        <td class="small muted">{{ row.cycle_type or '' }}</td>
+        <td class="num">{{ row.sessions }}</td>
+        <td class="num">{{ row.sessions_done }}</td>
+        <td><a class="button small" href="{{ url_for('workouts.week', week_id=row.id) }}">Open</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">No weeks yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<details class="panel">
+  <summary>Add a week</summary>
+  <div>
+    <form method="post" action="{{ url_for('workouts.save_week', plan_id=plan.id) }}">
+      <div class="row three">
+        <div class="field">
+          <label for="wk_number">Number</label>
+          <input type="text" inputmode="numeric" id="wk_number" name="number"
+                 placeholder="{{ weeks | length + 1 }}">
+        </div>
+        <div class="field">
+          <label for="wk_phase">Phase</label>
+          <select id="wk_phase" name="phase_id">
+            <option value="">None</option>
+            {% for row in phases %}<option value="{{ row.id }}">{{ row.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="wk_type">Cycle type</label>
+          <input type="text" id="wk_type" name="cycle_type" placeholder="A" maxlength="2">
+        </div>
+      </div>
+      <div class="field">
+        <label for="wk_label">Label</label>
+        <input type="text" id="wk_label" name="label" placeholder="Deload">
+      </div>
+      <p class="actions"><button class="primary" type="submit">Add week</button></p>
+    </form>
+  </div>
+</details>
+
+<h2>This plan as a template</h2>
+<div class="card">
+  <form method="post" action="{{ url_for('workouts.copy_plan', plan_id=plan.id) }}">
+    <p class="small">Copies the phases, weeks, sessions and every set into a new
+      plan. The tick-offs are <strong>not</strong> copied — a template is what
+      you intend to do, and inheriting last block's completed sessions would be a
+      lie about this one.</p>
+    <div class="row three">
+      <div class="field">
+        <label for="copy_name">New plan name</label>
+        <input type="text" id="copy_name" name="name" required
+               placeholder="{{ plan.name }} (copy)">
+      </div>
+      <div class="field">
+        <label for="copy_start">Starting</label>
+        <input type="date" id="copy_start" name="started_on" value="{{ today.isoformat() }}">
+      </div>
+      <div class="field">
+        <label for="copy_maxes">1RMs</label>
+        <select id="copy_maxes" name="with_maxes">
+          <option value="1">Copy them over</option>
+          <option value="">Start with none — I will retest</option>
+        </select>
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Copy into a new plan</button></p>
+  </form>
+</div>
+
+<details class="panel">
+  <summary>Plan details, and deleting it</summary>
+  <div>
+    <form method="post" action="{{ url_for('workouts.save_plan') }}">
+      <input type="hidden" name="plan_id" value="{{ plan.id }}">
+      <div class="row three">
+        <div class="field">
+          <label for="p_name">Name</label>
+          <input type="text" id="p_name" name="name" value="{{ plan.name }}" required>
+        </div>
+        <div class="field">
+          <label for="p_started">Started</label>
+          <input type="date" id="p_started" name="started_on" value="{{ plan.started_on or '' }}">
+        </div>
+        <div class="field">
+          <label for="p_round">Round weights to</label>
+          <select id="p_round" name="rounding_kg">
+            {% for step in rounding_steps %}
+            <option value="{{ step }}" {{ 'selected' if step == plan.rounding_kg }}>{{ step | kg }} kg</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="row two">
+        <div class="field">
+          <label for="p_note">Note</label>
+          <input type="text" id="p_note" name="note" value="{{ plan.note or '' }}">
+        </div>
+        <div class="field">
+          <label for="p_arch">Archived</label>
+          <select id="p_arch" name="archived">
+            <option value="">No</option>
+            <option value="1" {{ 'selected' if plan.archived }}>Yes — keep it, hide it</option>
+          </select>
+        </div>
+      </div>
+      <p class="actions"><button class="primary" type="submit">Save plan</button></p>
+    </form>
+    <form method="post" action="{{ url_for('workouts.delete_plan', plan_id=plan.id) }}"
+          onsubmit="return confirm('Delete {{ plan.name }} and all {{ totals.weeks }} weeks?')">
+      <p class="actions"><button class="danger" type="submit">Delete this plan</button></p>
+    </form>
+  </div>
+</details>
+{% endblock %}

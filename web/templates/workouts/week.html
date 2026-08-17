@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}{{ week | weektitle }} · {{ plan.name }}{% endblock %}
+
+{% block content %}
+<h1>{{ week | weektitle }}</h1>
+<p class="caption">
+  {{ plan.name }}{% if week.phase_name %} · {{ week.phase_name }}{% endif %}
+  {%- if week.cycle_type %} · type {{ week.cycle_type }}{% endif %} ·
+  <a href="{{ url_for('workouts.plan', plan=plan.id) }}">back to the plan</a>
+</p>
+
+<p class="actions">
+  {% for other in weeks %}
+  <a class="button small {{ 'primary' if other.id == week.id }}"
+     href="{{ url_for('workouts.week', week_id=other.id) }}">{{ other.number }}</a>
+  {% endfor %}
+</p>
+
+{% for session in sheet %}
+<div class="card">
+  <h3>{{ session | sessiontitle }}
+    {% if session.done %}<span class="rung-km">done {{ session.done_on | period }}</span>{% endif %}
+  </h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Exercise</th><th>Set</th><th class="num">#</th>
+            <th class="num">Reps</th><th class="num">Weight</th>
+            <th>Rest</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        {% for item in session.sheet %}
+        {% for row in item.sets %}
+        <tr>
+          <td>{% if loop.first %}<strong>{{ item.name }}</strong>{% endif %}</td>
+          <td class="small muted">{{ row.set_type | replace('warmup', 'Warm-up') | capitalize }}</td>
+          <td class="num">{{ row | setlabel }}</td>
+          <td class="num">{{ row | reps }}</td>
+          <td class="num">{{ row | load }}</td>
+          <td class="small muted">{{ row.rest or '' }}</td>
+          <td class="small muted">{{ row.cue or '' }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr><td colspan="7" class="muted">No exercises in this session.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="actions">
+    <a class="button small" href="{{ url_for('workouts.build', session=session.id) }}">Edit</a>
+    <form method="post" style="display:inline"
+          action="{{ url_for('workouts.tick', session_id=session.id) }}">
+      <input type="hidden" name="next" value="{{ url_for('workouts.week', week_id=week.id) }}">
+      <input type="hidden" name="done" value="{{ '0' if session.done else '1' }}">
+      <button class="small {{ '' if session.done else 'primary' }}" type="submit">
+        {{ 'Un-tick' if session.done else 'Tick off' }}</button>
+    </form>
+    <form method="post" style="display:inline"
+          action="{{ url_for('workouts.copy_session', session_id=session.id) }}">
+      <select name="week_id">
+        {% for other in weeks %}
+        <option value="{{ other.id }}" {{ 'selected' if other.id == week.id }}>
+          into week {{ other.number }}</option>
+        {% endfor %}
+      </select>
+      <button class="small" type="submit">Copy</button>
+    </form>
+    <form method="post" style="display:inline"
+          action="{{ url_for('workouts.delete_session', session_id=session.id) }}"
+          onsubmit="return confirm('Delete this session?')">
+      <button class="small danger" type="submit">Delete</button>
+    </form>
+  </p>
+</div>
+{% else %}
+<p class="muted">Nothing planned for this week yet.</p>
+{% endfor %}
+
+<p class="actions">
+  <a class="button primary" href="{{ url_for('workouts.build', week=week.id) }}">Add a session</a>
+</p>
+
+{% if week.note %}
+<div class="card">
+  <h3>Coaching notes</h3>
+  <ul class="small">
+    {% for line in week.note.split('\n') %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<details class="panel">
+  <summary>Week settings, copying and deleting</summary>
+  <div>
+    <form method="post" action="{{ url_for('workouts.save_week', plan_id=plan.id) }}">
+      <input type="hidden" name="week_id" value="{{ week.id }}">
+      <div class="row three">
+        <div class="field">
+          <label for="w_number">Number</label>
+          <input type="text" inputmode="numeric" id="w_number" name="number" value="{{ week.number }}">
+        </div>
+        <div class="field">
+          <label for="w_phase">Phase</label>
+          <select id="w_phase" name="phase_id">
+            <option value="">None</option>
+            {% for row in phases %}
+            <option value="{{ row.id }}" {{ 'selected' if row.id == week.phase_id }}>{{ row.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="w_type">Cycle type</label>
+          <input type="text" id="w_type" name="cycle_type" value="{{ week.cycle_type or '' }}" maxlength="2">
+        </div>
+      </div>
+      <div class="row two">
+        <div class="field">
+          <label for="w_label">Label</label>
+          <input type="text" id="w_label" name="label" value="{{ week.label or '' }}" placeholder="Deload">
+        </div>
+      </div>
+      <div class="field">
+        <label for="w_note">Coaching notes, one per line</label>
+        <textarea id="w_note" name="note" rows="4">{{ week.note or '' }}</textarea>
+      </div>
+      <p class="actions"><button class="primary" type="submit">Save week</button></p>
+    </form>
+
+    <form method="post" action="{{ url_for('workouts.copy_week', week_id=week.id) }}">
+      <p class="small">Copy this whole week — sessions, exercises and sets —
+        into a new one. This is how the rotation gets built: make week 1, copy it
+        to weeks 7 and 13, then change the percentages.</p>
+      <div class="row two">
+        <div class="field">
+          <label for="cw_number">Copy into week number</label>
+          <input type="text" inputmode="numeric" id="cw_number" name="number"
+                 placeholder="next free">
+        </div>
+      </div>
+      <p class="actions"><button type="submit">Copy this week</button></p>
+    </form>
+
+    <form method="post" action="{{ url_for('workouts.delete_week', week_id=week.id) }}"
+          onsubmit="return confirm('Delete week {{ week.number }} and its sessions?')">
+      <p class="actions"><button class="danger" type="submit">Delete this week</button></p>
+    </form>
+  </div>
+</details>
+{% endblock %}

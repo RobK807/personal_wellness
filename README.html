@@ -63,19 +63,20 @@ footer { max-width:52rem; margin:3rem auto 0; padding-top:1rem;
 <h1 id="personal-wellness">Personal Wellness</h1>
 <p>Four trackers behind one sidebar, on one database, with two front-ends over the
 top. The <strong>weigh-in tracker</strong> is the standalone app of the same name, moved in
-whole; the <strong>run tracker</strong> is new, built from seven years of runs scraped off
-Strava; the <strong>workout plan</strong> and the <strong>diet tracker</strong> are placeholders with
-nothing behind them yet, and say so.</p>
+whole; the <strong>run tracker</strong> is built from seven years of runs scraped off
+Strava; the <strong>workout tracker</strong> is built from the gym programme workbook; the
+<strong>diet tracker</strong> is a placeholder with nothing behind it yet, and says so.</p>
 <p>Built the same way as the CD dashboard next door: one shared <code>core</code> package, a
 <strong>Flask</strong> front-end light enough to run on the NAS, and a <strong>Streamlit</strong> one for
 a machine with memory to spare.</p>
 <pre><code class="language-bash">pip install -r requirements.txt
 python -m core.excel_import --rebuild     # the weigh-in history, once
 python -m core.strava_import --rebuild    # the runs, once
+python -m core.gym_import                 # the gym programme, once
 python serve.py                           # Flask, http://localhost:8503
 streamlit run app.py                      # Streamlit, same data
 </code></pre>
-<p>Both importers need a desktop — openpyxl opening a 1.5 MB workbook needs far
+<p>All three importers need a desktop — openpyxl opening a 1.5 MB workbook needs far
 more memory than the NAS has free. Everything else runs anywhere.</p>
 <hr>
 <h2 id="the-sections">The sections</h2>
@@ -101,11 +102,11 @@ navigations that can drift apart.</p>
 </tr>
 <tr>
 <td>🏋️ <strong>Workout plan</strong></td>
-<td>Placeholder. <a href="#the-two-that-are-not-built">Why there is no schema yet</a></td>
+<td>19 weeks, 38 sessions, 564 sets. <a href="#the-workout-tracker">What it does</a></td>
 </tr>
 <tr>
 <td>🥗 <strong>Diet tracker</strong></td>
-<td>Placeholder. Same.</td>
+<td>Placeholder. <a href="#the-one-that-is-not-built">Why there is no schema yet</a></td>
 </tr>
 </tbody>
 </table></div>
@@ -386,15 +387,145 @@ distance — so nothing about the data changed, but the sheet is right now and
 <pre><code class="language-bash">python run_test.py
 </code></pre>
 <hr>
-<h2 id="the-two-that-are-not-built">The two that are not built</h2>
-<p>There are no workout or diet tables in <code>core/schema.sql</code>, deliberately. Guessing
-at a schema for a tracker that has not been designed is expensive to undo once
-there is data in it, and the run tracker shows what designed looks like — a
-ladder of best efforts is a very particular shape, and it came from knowing what
-the sheet held.</p>
-<p>Each placeholder page lists what has to be decided first, and the order things
-get built in. The sections already exist in <code>config.SECTIONS</code>, so both
-front-ends already have the sidebar entry.</p>
+<h2 id="the-workout-tracker">The workout tracker</h2>
+<p>Built from <code>2026 Gym Programme.xlsx</code> — an 18-week powerlifting block plus a
+deload week, three phases, a rotating pairing of lifts, and a tick per workout.
+<code>python -m core.gym_import</code> folds it into one plan: <strong>19 weeks, 38 sessions, 116
+exercises, 564 sets</strong>, with weeks 1–10 already ticked off.</p>
+<h3 id="the-shape">The shape</h3>
+<pre><code>plan          a programme with a name — &quot;2026 Gym Programme&quot;
+ phase        a stretch of weeks sharing a set/rep scheme and a working %
+ week         numbered within the plan, belonging to one phase
+  session     up to 10 exercises; two per week in the workbook
+   exercise   one movement, in order, from the catalogue
+    set       one line of the sheet: type, reps, weight, rest, cue
+</code></pre>
+<p><strong>A cycle is not a level.</strong> The workbook's six-week rotation is six week shapes
+that repeat, and the weeks are still numbered 1–19 — so a cycle is a pattern you
+copy, which <code>weeks.cycle_type</code> labels, rather than a container that would then
+have to be kept in step with the numbering. Build week 1, copy it into weeks 7
+and 13, change the percentages.</p>
+<h3 id="prescribing-a-weight">Prescribing a weight</h3>
+<p>Four ways, because the workbook uses all four:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>mode</th>
+<th>column used</th>
+<th>reads as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>explicit</code></td>
+<td><code>weight_kg</code></td>
+<td><code>87.5 kg</code></td>
+</tr>
+<tr>
+<td><code>percent</code></td>
+<td><code>percent_1rm</code></td>
+<td><code>65% — 62.5 kg</code></td>
+</tr>
+<tr>
+<td><code>bodyweight</code></td>
+<td><code>added_kg</code></td>
+<td><code>Bodyweight</code>, <code>Bodyweight +10 kg</code></td>
+</tr>
+<tr>
+<td><code>choose</code></td>
+<td>none</td>
+<td><code>Choose weight</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Pull-Ups and Tricep Dips are main lifts in half the sessions and neither has a
+1RM, which is why <code>bodyweight</code> exists; the accessories say <em>Choose weight</em> and
+mean it, which is why <code>choose</code> does. A percentage of a bodyweight movement is
+refused — it would be a percentage of nothing.</p>
+<p><strong>The kilograms are worked out, never stored.</strong> <code>v_exercise_sets</code> turns a
+percentage into a weight: <code>% × 1RM</code>, rounded to the plan's step. That is the same
+rule the run tracker follows for pace, and it matters more here than it looks,
+because <strong>the rounding has to happen in exactly one place</strong>. SQLite's <code>ROUND</code> is
+half-away-from-zero and Python's <code>round()</code> is half-to-even, so 61.25 kg at a
+2.5 kg step is 62.5 to one and 60.0 to the other. <code>core.workouts.round_to()</code>
+reproduces SQLite's rule for the form's preview, and <code>workout_test.py</code> asserts
+the two agree — including on the exact half-way cases where they would not.</p>
+<p><strong>1RMs belong to the plan, not to you.</strong> Retest, start the next programme with
+the new numbers, and last year's block still says what it said at the time. One
+global 1RM per lift would silently restate history as a percentage of a max that
+did not exist yet.</p>
+<h3 id="reps-and-what-they-are-counted-in">Reps, and what they are counted in</h3>
+<p>Reps are a low and an optional high, so <code>10</code> and <code>10–12</code> are one column rather
+than a number and a string that only one of them parses. Whether they are <strong>per
+side</strong> and whether the weight is <strong>per dumbbell</strong> are properties of the movement
+— a Bulgarian split squat is per leg wherever it appears — so they live on the
+catalogue entry, with a nullable override on the session for the time it is done
+the other way round.</p>
+<p>That pair is also why the catalogue is asked for them at all: the sheet records
+<code>10 each leg</code> in passing and says nothing whatsoever about the weight, so <code>27.5</code>
+against an incline dumbbell press could be two 27.5s or one, and only you know.</p>
+<h3 id="phases">Phases</h3>
+<p>A phase carries defaults — warm-up percentages, working percentages, sets and
+reps, rest per set type — and the session builder pre-fills from whichever phase
+the week sits in. They are <strong>defaults, not constraints</strong>: once a set exists it
+carries its own percentage, and editing the phase afterwards does not reach back
+into sessions already built. A plan half-completed should not change shape
+because a later phase was re-planned.</p>
+<h3 id="the-pages">The pages</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Plan</strong></td>
+<td>Pick a plan, see its phases, 1RMs and weeks; copy it as a template</td>
+</tr>
+<tr>
+<td><strong>Build</strong></td>
+<td>The session builder, one session at a time</td>
+</tr>
+<tr>
+<td><strong>Tracker</strong></td>
+<td>Tick sessions off; the workbook's grid, a row per week</td>
+</tr>
+<tr>
+<td><strong>Exercises</strong></td>
+<td>The movement catalogue behind every dropdown</td>
+</tr>
+</tbody>
+</table></div>
+<p>The builder takes one session at a time on purpose. Generating a whole cycle from
+a form would need every variation expressed as parameters before you could see
+any of it; building one and copying the week gets there faster and shows you what
+you are getting.</p>
+<p><strong>Historic plans</strong> are the dropdown at the top of every page — every plan ever
+saved, newest first, found by the name it was saved under. <em>Copy into a new plan</em>
+reproduces the phases, weeks, sessions and sets, and the 1RMs if you want them.
+It does <strong>not</strong> copy the tick-offs: a template is what you intend to do, and
+inheriting last block's completed sessions would be a lie about this one.</p>
+<h3 id="the-catalogue">The catalogue</h3>
+<p>A closed list, for the same reason the run types are. <strong>Retire</strong> takes a movement
+out of the dropdowns and leaves every plan using it reading exactly as it did;
+<strong>Delete</strong> is only offered for the ones no session has ever used, because
+anything else would leave a hole in a plan from two years ago.</p>
+<h3 id="what-the-import-checks-rather-than-imports">What the import checks rather than imports</h3>
+<p>The workbook's <em>Weight (kg)</em> column, wherever a percentage sits beside it. It is
+<code>% × 1RM</code> rounded to 2.5 and nothing else, so importing it would be storing a
+derived value. All 268 of those cells are recomputed and compared instead, and
+the import says either <em>every weight matches</em> or lists the ones that do not.</p>
+<hr>
+<h2 id="the-one-that-is-not-built">The one that is not built</h2>
+<p>There are no diet tables in <code>core/schema.sql</code>, deliberately. Guessing at a schema
+for a tracker that has not been designed is expensive to undo once there is data
+in it, and the run and workout trackers both show what designed looks like — a
+ladder of best efforts is a very particular shape, and so is a set, and both came
+from knowing what the sheet held.</p>
+<p>The placeholder pages list what has to be decided first. The section already
+exists in <code>config.SECTIONS</code>, so both front-ends already have the sidebar entry.</p>
 <hr>
 <h2 id="how-back-filling-works">How back-filling works</h2>
 <p>The Adjustments sheet was a scratch pad: you pasted the reading before the gap
@@ -458,6 +589,7 @@ default 90-day view is about 60 KB.</p>
 <h2 id="tests">Tests</h2>
 <pre><code class="language-bash">python reconcile_test.py    # every weigh-in figure against the workbook
 python run_test.py          # every run figure against the Strava sheet
+python workout_test.py      # every set and weight against the gym workbook
 python smoke_test.py        # the weigh-in write path, especially back-filling
 python web_test.py          # every Flask route, form and both navigations
 python streamlit_test.py    # every Streamlit page, with data and without

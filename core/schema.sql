@@ -2,10 +2,10 @@
 --
 -- One database, one section at a time. The weigh-in tables come first and are
 -- unchanged from the standalone tracker, so its data/weigh_ins.db can simply be
--- renamed and the run tables appear alongside it on first start. The run tables
--- follow. Workouts and diet have no tables yet - their pages are placeholders,
--- and inventing a schema for a tracker that has not been designed would be
--- guessing in a place that is expensive to change later.
+-- renamed and the rest appear alongside it on first start. Then the run tables,
+-- then the workout ones. Diet has none yet - its pages are placeholders, and
+-- inventing a schema for a tracker that has not been designed would be guessing
+-- in a place that is expensive to change later.
 
 PRAGMA foreign_keys = ON;
 
@@ -375,3 +375,346 @@ SELECT
     END                 AS suspect
 FROM run_bests b
 JOIN runs r ON r.id = b.run_id;
+
+
+-- ===========================================================================
+-- WORKOUT PLAN AND TRACKER
+--
+-- Built from `2026 Gym Programme.xlsx`, which is one sheet per week plus a
+-- Programme Overview holding the 1RMs, the phases and the rotating pairings.
+-- That workbook is the shape this has to reproduce, so it is worth naming what
+-- it actually is before the tables make sense:
+--
+--     plan          a programme with a name - "2026 Gym Programme"
+--      phase        a stretch of weeks sharing a set/rep scheme and a working %
+--      week         numbered within the plan, belonging to one phase
+--       session     up to 10 exercises; two per week in the workbook
+--        exercise   one movement, in order, from the catalogue
+--         set       one line of the sheet: type, reps, weight, rest, cue
+--
+-- A "cycle" is not a level here. The workbook's six-week rotation is six week
+-- shapes that repeat, and the weeks are still numbered 1..19 - so a cycle is a
+-- pattern you copy, which `weeks.cycle_type` labels, rather than a container
+-- that would then have to be kept in step with the numbering.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- The exercise catalogue: what the dropdown offers.
+--
+-- The same closed-list idea as run_options, for the same reason - a movement
+-- typed freely three different ways is three movements as far as any total is
+-- concerned - but a table rather than a list of strings, because an exercise
+-- carries facts about itself.
+--
+-- `reps_mode` and `weight_mode` are among those facts: a Bulgarian split squat
+-- is per leg wherever it appears, and a dumbbell curl is per dumbbell. A
+-- session may still override either, which is what the nullable pair on
+-- session_exercises is for.
+--
+-- `is_bodyweight` marks the movements with no 1RM to take a percentage of.
+-- Pull-Ups and Tricep Dips are main lifts in half the workbook's sessions and
+-- neither has a number in its 1RM table; they progress by added weight.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS exercises (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT    NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+    reps_mode     TEXT    NOT NULL DEFAULT 'total'
+                          CHECK (reps_mode IN ('total', 'per_side')),
+    weight_mode   TEXT    NOT NULL DEFAULT 'total'
+                          CHECK (weight_mode IN ('total', 'per_dumbbell')),
+    is_bodyweight INTEGER NOT NULL DEFAULT 0 CHECK (is_bodyweight IN (0, 1)),
+    position      INTEGER NOT NULL,
+    retired       INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
+    note          TEXT,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---------------------------------------------------------------------------
+-- One programme.
+--
+-- `rounding_kg` is the increment a prescribed weight is rounded to - 2.5 in the
+-- workbook, and every one of its percentages reproduces exactly at that step.
+-- Per plan because it is a property of the plates in the gym you are in.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS plans (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT    NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+    started_on  TEXT,                                  -- ISO date, optional
+    rounding_kg REAL    NOT NULL DEFAULT 2.5 CHECK (rounding_kg > 0),
+    note        TEXT,
+    archived    INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    source      TEXT    NOT NULL DEFAULT 'manual',     -- 'manual' or 'xlsx'
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---------------------------------------------------------------------------
+-- The 1RMs, held per plan rather than once globally.
+--
+-- A plan's prescribed weights have to stay where they were put. Retest, start
+-- the next programme with the new numbers, and last year's block still says
+-- what it said at the time - which one global 1RM per lift would silently
+-- rewrite the moment it changed, quietly restating history as a percentage of
+-- a max that did not exist yet.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS plan_maxes (
+    plan_id     INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+    one_rm_kg   REAL    NOT NULL CHECK (one_rm_kg > 0),
+    PRIMARY KEY (plan_id, exercise_id)
+);
+
+-- ---------------------------------------------------------------------------
+-- A phase: the stretch of weeks sharing a scheme.
+--
+-- The percentage lists are JSON arrays - '[0.5, 0.7]' - because they are a
+-- short ordered list, read and written whole, and a table of one number per row
+-- would be four joins to answer "what does a Phase 1 warm-up look like".
+--
+-- Everything here is a **default the session builder pre-fills from**, never a
+-- constraint on what a session may hold: once a set exists it carries its own
+-- percentage, and editing the phase afterwards does not reach back into it.
+-- That is deliberate. A plan half-completed should not change shape because a
+-- later phase was re-planned.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS phases (
+    id             INTEGER PRIMARY KEY,
+    plan_id        INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    name           TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    focus          TEXT,
+    position       INTEGER NOT NULL,
+    warmup_pcts    TEXT,        -- JSON, e.g. '[0.5, 0.7]'
+    working_pcts   TEXT,        -- JSON, e.g. '[0.65]' or '[0.87, 0.92, 0.97]'
+    working_sets   INTEGER CHECK (working_sets IS NULL OR working_sets > 0),
+    working_reps   TEXT,        -- '10' or '10-12'
+    accessory_sets INTEGER CHECK (accessory_sets IS NULL OR accessory_sets > 0),
+    accessory_reps TEXT,
+    rest_warmup    TEXT,
+    rest_working   TEXT,
+    rest_accessory TEXT,
+    UNIQUE (plan_id, name)
+);
+
+-- ---------------------------------------------------------------------------
+-- A week. Numbered within the plan; `label` is for the ones that are not just a
+-- number, like Deload. `cycle_type` is the workbook's A/B rotation, kept as a
+-- label so the pattern is visible without being enforced.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS weeks (
+    id         INTEGER PRIMARY KEY,
+    plan_id    INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    number     INTEGER NOT NULL CHECK (number > 0),
+    label      TEXT,
+    phase_id   INTEGER REFERENCES phases(id) ON DELETE SET NULL,
+    cycle_type TEXT,
+    note       TEXT,            -- the sheet's per-week coaching notes
+    UNIQUE (plan_id, number)
+);
+
+-- ---------------------------------------------------------------------------
+-- A session. Up to ten exercises, which is the brief; the workbook uses two
+-- main lifts, or one main lift and three accessories.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sessions (
+    id      INTEGER PRIMARY KEY,
+    week_id INTEGER NOT NULL REFERENCES weeks(id) ON DELETE CASCADE,
+    number  INTEGER NOT NULL CHECK (number BETWEEN 1 AND 10),
+    name    TEXT,               -- blank means "name it after its main lifts"
+    note    TEXT,
+    UNIQUE (week_id, number)
+);
+
+-- ---------------------------------------------------------------------------
+-- One movement inside a session, in order.
+--
+-- The two mode columns are NULL almost always, meaning "whatever the catalogue
+-- says". They exist for the movement done the other way round this once, so
+-- that recording it does not mean redefining the exercise everywhere it has
+-- ever appeared.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS session_exercises (
+    id          INTEGER PRIMARY KEY,
+    session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+    position    INTEGER NOT NULL CHECK (position BETWEEN 1 AND 10),
+    reps_mode   TEXT CHECK (reps_mode IS NULL
+                            OR reps_mode IN ('total', 'per_side')),
+    weight_mode TEXT CHECK (weight_mode IS NULL
+                            OR weight_mode IN ('total', 'per_dumbbell')),
+    note        TEXT,
+    UNIQUE (session_id, position)
+);
+
+-- ---------------------------------------------------------------------------
+-- One line of a week sheet.
+--
+-- `load_mode` is the four ways that workbook prescribes a weight, and each one
+-- uses exactly one of the three columns after it:
+--
+--     explicit     weight_kg      "87.5"
+--     percent      percent_1rm    "0.65" -> 65% of the plan's 1RM, rounded
+--     bodyweight   added_kg       "Bodyweight", or "+10 kg added"
+--     choose       none           "Choose weight" / "Light weight"
+--
+-- Reps are a low and an optional high, so that '10' and '10-12' are the same
+-- column rather than a number and a string that only one of them parses.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS exercise_sets (
+    id                  INTEGER PRIMARY KEY,
+    session_exercise_id INTEGER NOT NULL
+                        REFERENCES session_exercises(id) ON DELETE CASCADE,
+    set_type            TEXT    NOT NULL
+                        CHECK (set_type IN ('warmup', 'working', 'accessory')),
+    position            INTEGER NOT NULL CHECK (position > 0),
+    reps_low            INTEGER CHECK (reps_low IS NULL OR reps_low > 0),
+    reps_high           INTEGER CHECK (reps_high IS NULL OR reps_high > 0),
+    load_mode           TEXT    NOT NULL CHECK (load_mode IN
+                            ('explicit', 'percent', 'bodyweight', 'choose')),
+    weight_kg           REAL    CHECK (weight_kg IS NULL OR weight_kg >= 0),
+    percent_1rm         REAL    CHECK (percent_1rm IS NULL
+                                    OR (percent_1rm > 0 AND percent_1rm <= 2)),
+    added_kg            REAL    CHECK (added_kg IS NULL OR added_kg >= 0),
+    rest                TEXT,
+    cue                 TEXT,
+    UNIQUE (session_exercise_id, set_type, position),
+    CHECK (reps_high IS NULL OR reps_low IS NULL OR reps_high >= reps_low)
+);
+
+-- ---------------------------------------------------------------------------
+-- The tracker: one row per session actually done.
+--
+-- A row rather than a flag on `sessions`, so "not done yet" is the absence of a
+-- record instead of a zero that would have to be written for all thirty-eight
+-- sessions of a nineteen-week plan before any of them happened. The workbook
+-- ticked a whole workout at a time and this is the same grain.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS session_log (
+    session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    done_on    TEXT    NOT NULL,          -- ISO date
+    note       TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_weeks_plan    ON weeks(plan_id, number);
+CREATE INDEX IF NOT EXISTS idx_sessions_week ON sessions(week_id, number);
+CREATE INDEX IF NOT EXISTS idx_sx_session    ON session_exercises(session_id, position);
+CREATE INDEX IF NOT EXISTS idx_sets_sx       ON exercise_sets(session_exercise_id, set_type, position);
+
+-- ---------------------------------------------------------------------------
+-- Every prescribed set, with its weight worked out.
+--
+-- This is the one place a percentage becomes kilograms, and it is here rather
+-- than in Python for a reason worth stating: rounding half-way cases has to
+-- happen once. SQLite's ROUND is half-away-from-zero and Python's round() is
+-- half-to-even, so 61.25 kg at a 2.5 step is 62.5 to one and 60.0 to the other.
+-- Two implementations would disagree on exactly the weights a lifter notices.
+-- core/workouts.py round_to() reproduces this rule for the input form's
+-- preview, and workout_test.py asserts the two agree.
+--
+-- `weight_kg` on the row is what an explicit set holds; `prescribed_kg` is what
+-- to actually put on the bar, whichever mode was used, and NULL when the answer
+-- is genuinely "your choice" or the 1RM has not been entered yet.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_exercise_sets;
+CREATE VIEW v_exercise_sets AS
+SELECT
+    s.id,
+    s.session_exercise_id,
+    sx.session_id,
+    sx.position                                        AS exercise_position,
+    se.week_id,
+    w.plan_id,
+    w.number                                           AS week_number,
+    se.number                                          AS session_number,
+    e.id                                               AS exercise_id,
+    e.name                                             AS exercise_name,
+    e.is_bodyweight,
+    COALESCE(sx.reps_mode, e.reps_mode)                AS reps_mode,
+    COALESCE(sx.weight_mode, e.weight_mode)            AS weight_mode,
+    s.set_type,
+    s.position,
+    s.reps_low,
+    s.reps_high,
+    s.load_mode,
+    s.weight_kg,
+    s.percent_1rm,
+    s.added_kg,
+    s.rest,
+    s.cue,
+    m.one_rm_kg,
+    p.rounding_kg,
+    CASE s.load_mode
+        WHEN 'explicit'   THEN s.weight_kg
+        WHEN 'bodyweight' THEN s.added_kg
+        WHEN 'percent'    THEN
+            CASE WHEN m.one_rm_kg IS NULL THEN NULL
+                 ELSE ROUND(s.percent_1rm * m.one_rm_kg / p.rounding_kg)
+                      * p.rounding_kg
+            END
+    END                                                AS prescribed_kg
+FROM exercise_sets s
+JOIN session_exercises sx ON sx.id = s.session_exercise_id
+JOIN sessions se          ON se.id = sx.session_id
+JOIN weeks w              ON w.id  = se.week_id
+JOIN plans p              ON p.id  = w.plan_id
+JOIN exercises e          ON e.id  = sx.exercise_id
+LEFT JOIN plan_maxes m    ON m.plan_id = w.plan_id AND m.exercise_id = e.id;
+
+-- ---------------------------------------------------------------------------
+-- Every session, with what is in it and whether it has been done.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_sessions;
+CREATE VIEW v_sessions AS
+SELECT
+    se.id,
+    se.week_id,
+    se.number,
+    se.name,
+    se.note,
+    w.plan_id,
+    w.number                                    AS week_number,
+    w.label                                     AS week_label,
+    w.cycle_type,
+    w.note                                      AS week_note,
+    ph.name                                     AS phase_name,
+    ph.position                                 AS phase_position,
+    p.name                                      AS plan_name,
+    (SELECT COUNT(*) FROM session_exercises sx
+      WHERE sx.session_id = se.id)              AS exercises,
+    (SELECT COUNT(*) FROM exercise_sets s
+      JOIN session_exercises sx ON sx.id = s.session_exercise_id
+      WHERE sx.session_id = se.id)              AS sets,
+    -- What the session is, in the workbook's own shorthand: the movements that
+    -- carry working sets, which is what makes "Bench Press + Squats" the name
+    -- and leaves the three accessories out of it.
+    (SELECT group_concat(name, ' + ') FROM
+       (SELECT e.name AS name FROM session_exercises sx
+          JOIN exercises e ON e.id = sx.exercise_id
+         WHERE sx.session_id = se.id
+           AND EXISTS (SELECT 1 FROM exercise_sets s
+                        WHERE s.session_exercise_id = sx.id
+                          AND s.set_type = 'working')
+         ORDER BY sx.position))                 AS main_lifts,
+    l.done_on,
+    l.note                                      AS done_note,
+    CASE WHEN l.session_id IS NULL THEN 0 ELSE 1 END AS done
+FROM sessions se
+JOIN weeks w           ON w.id = se.week_id
+JOIN plans p           ON p.id = w.plan_id
+LEFT JOIN phases ph    ON ph.id = w.phase_id
+LEFT JOIN session_log l ON l.session_id = se.id;
+
+-- ---------------------------------------------------------------------------
+-- Every plan, with how big it is and how far through it you are.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_plans;
+CREATE VIEW v_plans AS
+SELECT
+    p.*,
+    (SELECT COUNT(*) FROM weeks w WHERE w.plan_id = p.id)      AS weeks,
+    (SELECT COUNT(*) FROM phases ph WHERE ph.plan_id = p.id)   AS phases,
+    (SELECT COUNT(*) FROM v_sessions v WHERE v.plan_id = p.id) AS sessions,
+    (SELECT COUNT(*) FROM v_sessions v
+      WHERE v.plan_id = p.id AND v.done = 1)                   AS sessions_done,
+    (SELECT MAX(done_on) FROM v_sessions v WHERE v.plan_id = p.id) AS last_done
+FROM plans p;

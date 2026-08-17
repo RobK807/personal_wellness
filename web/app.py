@@ -22,7 +22,7 @@ from flask import (Flask, flash, redirect, render_template, request, session,
                    url_for)
 
 import config
-from core import db, metrics, queries, runs
+from core import db, metrics, queries, runs, workouts
 from web import nav
 
 
@@ -127,6 +127,40 @@ def _register_filters(app: Flask) -> None:
     def _interval_length(row) -> str:
         return runs.interval_length(row) or ""
 
+    # ---- workouts ---------------------------------------------------------
+    @app.template_filter("kg")
+    def _kg(value) -> str:
+        return workouts.fmt_kg(value)
+
+    @app.template_filter("reps")
+    def _reps(row) -> str:
+        return workouts.fmt_reps(row.get("reps_low"), row.get("reps_high"),
+                                 row.get("reps_mode") or "total")
+
+    @app.template_filter("load")
+    def _load(row) -> str:
+        return workouts.fmt_load(row)
+
+    @app.template_filter("setlabel")
+    def _set_label(row) -> str:
+        return workouts.set_label(row)
+
+    @app.template_filter("sessiontitle")
+    def _session_title(row) -> str:
+        return workouts.session_title(row)
+
+    @app.template_filter("weektitle")
+    def _week_title(row) -> str:
+        return workouts.week_title(row)
+
+    @app.template_filter("pcts")
+    def _pcts(value) -> str:
+        return workouts.fmt_percent_list(value)
+
+    @app.template_filter("pct")
+    def _pct(value) -> str:
+        return f"{float(value) * 100:g}%" if value else ""
+
 
 def _register_context(app: Flask) -> None:
     """Everything base.html needs, on every page."""
@@ -163,6 +197,14 @@ def _summary_line(section: str | None) -> str | None:
         if current:
             return (f"{metrics.fmt('weight', current['weight'], True)} · "
                     f"{metrics.period_label('daily', current['period'])}")
+    elif section == "workouts":
+        from core import workout_queries
+
+        plan = workout_queries.current_plan()
+        if plan:
+            totals = workout_queries.totals(plan["id"])
+            return (f"{plan['name']} · {totals['sessions_done']}/"
+                    f"{totals['sessions']} sessions")
     elif section == "runs":
         # Imported here rather than at module level: this is the only thing on
         # the shared path that needs it, and the import is cheap either way.

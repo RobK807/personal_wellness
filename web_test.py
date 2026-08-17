@@ -107,6 +107,197 @@ def seed_runs() -> None:
             splits)
 
 
+def workout_tracker(client) -> None:
+    """The workout section: build a session, read it back, tick it off.
+
+    Deliberately not the gym workbook - workout_test.py reconciles against that.
+    This is the routes and the form handler, on a fixture whose answers can be
+    worked out by hand: a 100 kg bench press, so every percentage is its own
+    number of kilograms.
+    """
+    from core import workout_queries as wq, workouts
+
+    print("\nworkout tracker: the empty state")
+    body = client.get("/workouts/").get_data(as_text=True)
+    check("says there are no plans", "Nothing here yet" in body, True)
+    check("the exercise catalogue is seeded", len(wq.exercises()), 24)
+    for path in ["/workouts/", "/workouts/tracker", "/workouts/exercises"]:
+        check(f"GET {path}", client.get(path).status_code, 200)
+
+    print("\nworkout tracker: creating a plan")
+    resp = client.post("/workouts/plan/save", data={
+        "name": "Test block", "rounding_kg": "2.5",
+        "started_on": TODAY.isoformat()}, follow_redirects=True)
+    check("status", resp.status_code, 200)
+    plan = wq.plan_by_name("Test block")
+    check("saved", plan is not None, True)
+    check("refuses a second plan of the same name",
+          "flash flash-error" in client.post(
+              "/workouts/plan/save", data={"name": "Test block"},
+              follow_redirects=True).get_data(as_text=True), True)
+
+    lookup = {row["name"]: row["id"] for row in wq.exercises()}
+    client.post(f"/workouts/plan/{plan['id']}/max",
+                data={"exercise_id": lookup["Bench Press"], "one_rm_kg": "100"},
+                follow_redirects=True)
+    check("1RM saved", wq.max_for(plan["id"], lookup["Bench Press"]), 100.0)
+
+    client.post(f"/workouts/plan/{plan['id']}/phase", data={
+        "name": "Phase 1", "focus": "Hypertrophy", "warmup_pcts": "50, 70",
+        "working_pcts": "65", "working_sets": "5", "working_reps": "10",
+        "accessory_sets": "3", "accessory_reps": "10-12"},
+        follow_redirects=True)
+    phase = wq.phases(plan["id"])[0]
+    check("phase saved", phase["name"], "Phase 1")
+    check("its percentages round-trip",
+          workouts.percent_list(phase["warmup_pcts"]), [0.5, 0.7])
+
+    client.post(f"/workouts/plan/{plan['id']}/week", data={
+        "number": "1", "phase_id": phase["id"], "cycle_type": "A"},
+        follow_redirects=True)
+    week = wq.week_number(plan["id"], 1)
+    check("week saved", week is not None, True)
+    check("GET the week",
+          client.get(f"/workouts/week/{week['id']}").status_code, 200)
+    check("GET the builder",
+          client.get(f"/workouts/build?week={week['id']}").status_code, 200)
+
+    print("\nworkout tracker: the session builder")
+    form = {
+        "number": "1", "name": "",
+        "ex1_id": lookup["Bench Press"],
+        "ex1_w1_reps": "5", "ex1_w1_mode": "percent", "ex1_w1_pct": "50",
+        "ex1_w2_reps": "3", "ex1_w2_mode": "percent", "ex1_w2_pct": "70",
+        "ex1_w_rest": "60s",
+        "ex1_working_sets": "5", "ex1_working_reps": "10",
+        "ex1_working_mode": "percent", "ex1_working_pct": "65",
+        "ex1_working_rest": "2-3 min", "ex1_working_cue": "Log RPE",
+        "ex2_id": lookup["Pull-Ups"],
+        "ex2_working_sets": "3", "ex2_working_reps": "8-10",
+        "ex2_working_mode": "bodyweight", "ex2_working_added": "5",
+        "ex3_id": lookup["Bulgarian Split Squat (Dumbbells)"],
+        "ex3_accessory_sets": "3", "ex3_accessory_reps": "10",
+        "ex3_accessory_mode": "choose",
+    }
+    body = client.post(f"/workouts/build?week={week['id']}", data=form,
+                       follow_redirects=True).get_data(as_text=True)
+    check("saved without complaint", "flash flash-error" in body, False)
+    session = wq.sessions(week_id=week["id"])[0]
+    check("three exercises", session["exercises"], 3)
+    check("thirteen sets", session["sets"], 13)
+    check("named after its working lifts",
+          workouts.session_title(session), "Session 1 - Bench Press + Pull-Ups")
+
+    sheet = wq.session_sheet(session["id"])
+    check("warm-ups then working sets",
+          [row["set_type"] for row in sheet[0]["sets"]],
+          ["warmup", "warmup"] + ["working"] * 5)
+    # 50, 70 and 65 percent of 100 kg, rounded to 2.5: exact, so the arithmetic
+    # is checkable by eye rather than by trusting the same code that wrote it.
+    check("percentages became kilograms",
+          [row["prescribed_kg"] for row in sheet[0]["sets"]],
+          [50.0, 70.0, 65.0, 65.0, 65.0, 65.0, 65.0])
+    check("the bodyweight sets carry their added weight",
+          {row["prescribed_kg"] for row in sheet[1]["sets"]}, {5.0})
+    check("the accessory has no weight to give",
+          {row["prescribed_kg"] for row in sheet[2]["sets"]}, {None})
+    check("and says so on the page",
+          "Choose weight" in
+          client.get(f"/workouts/week/{week['id']}").get_data(as_text=True),
+          True)
+    check("the per-side movement says so too",
+          "each side" in
+          client.get(f"/workouts/week/{week['id']}").get_data(as_text=True),
+          True)
+
+    print("\nworkout tracker: the builder refuses what makes no sense")
+    for label, override in [
+        ("a percentage of a bodyweight movement",
+         {"ex2_working_mode": "percent", "ex2_working_pct": "80"}),
+        ("bodyweight on a barbell movement",
+         {"ex1_working_mode": "bodyweight", "ex1_working_added": "5"}),
+        ("a session with nothing in it",
+         {"ex1_id": "", "ex2_id": "", "ex3_id": ""}),
+        ("a rep range that runs backwards", {"ex1_working_reps": "12-8"}),
+        ("a percentage nobody could lift", {"ex1_working_pct": "400"}),
+        ("a rep count that is not a number", {"ex1_working_reps": "lots"}),
+    ]:
+        body = client.post(f"/workouts/build?week={week['id']}",
+                           data={**form, **override, "number": "2"},
+                           follow_redirects=True).get_data(as_text=True)
+        check(f"refuses {label}", "flash flash-error" in body, True)
+
+    print("\nworkout tracker: ticking off")
+    client.post(f"/workouts/session/{session['id']}/tick",
+                data={"done": "1", "done_on": TODAY.isoformat()},
+                follow_redirects=True)
+    check("ticked", wq.session(session["id"])["done"], 1)
+    check("the plan says so", wq.totals(plan["id"])["sessions_done"], 1)
+    client.post(f"/workouts/session/{session['id']}/tick", data={"done": "0"},
+                follow_redirects=True)
+    check("un-ticked", wq.session(session["id"])["done"], 0)
+    check("a tick in the future is refused",
+          "flash flash-error" in client.post(
+              f"/workouts/session/{session['id']}/tick",
+              data={"done": "1",
+                    "done_on": (TODAY + dt.timedelta(days=1)).isoformat()},
+              follow_redirects=True).get_data(as_text=True), True)
+
+    print("\nworkout tracker: copying")
+    client.post(f"/workouts/week/{week['id']}/copy", data={"number": "2"},
+                follow_redirects=True)
+    check("the week was copied", len(wq.weeks(plan["id"])), 2)
+    check("with its sessions",
+          len(wq.sessions(week_id=wq.week_number(plan["id"], 2)["id"])), 1)
+    plan = wq.plan(plan["id"])
+    body = client.post(f"/workouts/plan/{plan['id']}/copy",
+                       data={"name": "Test block II", "with_maxes": "1"},
+                       follow_redirects=True).get_data(as_text=True)
+    check("the plan was copied", "nothing ticked off" in body, True)
+    copy = wq.plan_by_name("Test block II")
+    check("same structure", (copy["weeks"], copy["sessions"]),
+          (plan["weeks"], plan["sessions"]))
+    check("no history", copy["sessions_done"], 0)
+    check("the 1RM came too",
+          wq.max_for(copy["id"], lookup["Bench Press"]), 100.0)
+
+    print("\nworkout tracker: the exercise catalogue")
+    client.post("/workouts/exercises", data={
+        "name": "Zercher Squat", "reps_mode": "total",
+        "weight_mode": "total"}, follow_redirects=True)
+    check("added", wq.exercise_by_name("Zercher Squat") is not None, True)
+    check("refuses a duplicate",
+          "flash flash-error" in client.post(
+              "/workouts/exercises", data={"name": "zercher squat"},
+              follow_redirects=True).get_data(as_text=True), True)
+    check("refuses deleting one a plan uses",
+          "flash flash-error" in client.post(
+              "/workouts/exercises",
+              data={"action": "delete", "exercise_id": lookup["Bench Press"]},
+              follow_redirects=True).get_data(as_text=True), True)
+    client.post("/workouts/exercises",
+                data={"action": "retire",
+                      "exercise_id": lookup["Goblet Squat"]},
+                follow_redirects=True)
+    check("retiring takes it out of the dropdown",
+          lookup["Goblet Squat"] in {row["id"] for row in wq.exercises()},
+          False)
+    check("but leaves it in the catalogue",
+          lookup["Goblet Squat"] in
+          {row["id"] for row in wq.exercises(include_retired=True)}, True)
+
+    print("\nworkout tracker: every page with a plan in it")
+    for path in ["/workouts/", "/workouts/tracker", "/workouts/exercises",
+                 f"/workouts/week/{week['id']}",
+                 f"/workouts/build?week={week['id']}",
+                 f"/workouts/build?session={session['id']}"]:
+        check(f"GET {path}", client.get(path).status_code, 200)
+    check("a missing week is a 404",
+          client.get("/workouts/week/999999").status_code, 404)
+    check("a missing session is a 404",
+          client.get("/workouts/build?session=999999").status_code, 404)
+
+
 def run_tracker(client) -> None:
     """Every run tracker page, and the write path behind the input form."""
     print("\nrun tracker: the empty state")
@@ -671,8 +862,10 @@ def main() -> int:
             check(f"{endpoint} is a real endpoint",
                   endpoint in app.view_functions, True)
 
+    workout_tracker(client)
+
     print("\nthe placeholder sections render")
-    for path in ["/workouts/", "/workouts/tracker", "/diet/", "/diet/analysis"]:
+    for path in ["/diet/", "/diet/analysis"]:
         response = client.get(path)
         check(f"GET {path}", response.status_code, 200)
         check(f"{path} says it is not built",
