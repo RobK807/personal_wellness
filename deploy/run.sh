@@ -16,6 +16,24 @@ set -e
 APP_DIR=$(cd "$(dirname "$0")/.." && pwd)
 LOG="$APP_DIR/data/server.log"
 
+# How long to wait for it to bind before giving up, in seconds. Startup does
+# real work before it listens: the schema is applied, missing columns and views
+# are created and the seed rows go in, and on this NAS that has taken longer
+# than three seconds ever since the workout tables were added. Waiting a fixed
+# three reported a perfectly healthy app as a failure.
+STARTUP_TIMEOUT="${PW_STARTUP_TIMEOUT:-45}"
+
+# Is a pid a live process rather than a zombie? A background child that has
+# exited still has a /proc entry until the shell reaps it, so `[ -d /proc/$pid ]`
+# and `kill -0` both say yes to something that is already dead. A zombie's
+# cmdline is empty, which is the difference that matters here - and is how
+# stop.sh identifies our processes too.
+alive() {
+    [ -r "/proc/$1/cmdline" ] || return 1
+    cmd=$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null)
+    [ -n "$cmd" ]
+}
+
 # Find the virtualenv. A venv inside this app wins, so one dashboard can be
 # given its own dependencies later without disturbing the others; otherwise fall
 # back to the one shared with the CD dashboard. Override with PW_VENV.
@@ -80,24 +98,49 @@ cd "$APP_DIR"
 
 # 0.0.0.0 so Tailscale can reach it. The NAS is not port-forwarded, so this does
 # not expose the app to the public internet - PW_APP_PASSWORD is the second layer.
-nohup "$VENV/bin/python" serve.py --host 0.0.0.0 --port "$PW_WEB_PORT" \
+#
+# -u because Python block-buffers stdout when it is a file rather than a
+# terminal, so everything printed on the way up - including "Serving on ..." -
+# sat in a 4 KB buffer instead of the log. That is exactly backwards: the log is
+# the only thing you have when a start goes wrong, and it was empty precisely
+# then. stderr was never the problem; a traceback always arrived.
+nohup "$VENV/bin/python" -u serve.py --host 0.0.0.0 --port "$PW_WEB_PORT" \
     >> "$LOG" 2>&1 &
 
 # Record the pid so stop.sh does not have to hunt for it. DSM's BusyBox ps
 # truncates long command lines, which makes `ps | grep serve.py` unreliable.
-echo $! > "$APP_DIR/data/server.pid"
+PID=$!
+echo "$PID" > "$APP_DIR/data/server.pid"
 
-# nohup returns immediately, so "started" only means "launched". Give it a
-# moment and report whether it is actually listening.
-sleep 3
-if netstat -ln 2>/dev/null | grep -q ":$PW_WEB_PORT "; then
-    echo "Running on port $PW_WEB_PORT (pid $(cat "$APP_DIR/data/server.pid"))"
-    echo "Using $VENV"
-    echo "Logs: $LOG"
+# nohup returns immediately, so "started" only means "launched". Wait for it to
+# actually bind, checking every second rather than assuming a fixed wait is
+# long enough, and stop early if the process dies.
+i=0
+while [ "$i" -lt "$STARTUP_TIMEOUT" ]; do
+    if netstat -ln 2>/dev/null | grep -q ":$PW_WEB_PORT "; then
+        echo "Running on port $PW_WEB_PORT (pid $PID), listening after ${i}s"
+        echo "Using $VENV"
+        echo "Logs: $LOG"
+        exit 0
+    fi
+    alive "$PID" || break
+    sleep 1
+    i=$((i + 1))
+done
+
+# Two different failures, and telling them apart is the point. A process that is
+# still alive but has not bound yet is not something to clean up after: deleting
+# its pid file is how a running app gets orphaned from the script meant to stop
+# it, which is what used to happen here.
+if alive "$PID"; then
+    echo "Started (pid $PID) but not listening after ${i}s." >&2
+    echo "It may still be coming up. Check with:" >&2
+    echo "  netstat -ln | grep :$PW_WEB_PORT" >&2
+    echo "The pid file is left in place, so stop.sh can still find it." >&2
 else
-    echo "FAILED to start - it launched but is not listening." >&2
-    echo "Last few log lines:" >&2
-    tail -n 15 "$LOG" >&2
+    echo "FAILED to start - the process exited." >&2
     rm -f "$APP_DIR/data/server.pid"
-    exit 1
 fi
+echo "Last few log lines:" >&2
+tail -n 20 "$LOG" >&2
+exit 1

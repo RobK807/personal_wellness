@@ -325,6 +325,31 @@ without the app.
 
 ## Troubleshooting
 
+### "FAILED to start - it launched but is not listening"
+
+Check whether it actually failed before doing anything about it:
+
+```bash
+netstat -ln | grep :8503
+curl -s localhost:8503/healthz
+```
+
+If it is listening, it started and the script gave up too early. `run.sh` now
+waits up to 45 seconds (`PW_STARTUP_TIMEOUT`) rather than a fixed three, because
+startup applies the schema, adds any missing columns and views and writes the
+seed rows before it binds — which on this NAS takes longer than three seconds
+since the workout tables were added.
+
+If it is **not** listening, the log is worth reading now: `run.sh` runs Python
+with `-u`, so everything printed on the way up reaches `data/server.log` instead
+of sitting in a buffer. A start that fails with an empty log used to be the
+normal outcome and is now a real signal.
+
+Either way `stop.sh` can find the process, with or without a pid file — it falls
+back to scanning `/proc` for one running `serve.py --port 8503`.
+
+
+
 **`run.sh` reports it failed to start.** It waits three seconds and checks
 whether anything is listening, printing the last few log lines if not. The most
 likely cause is code that needs Python 3.10 reaching the NAS's 3.9 — run

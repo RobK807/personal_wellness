@@ -330,6 +330,22 @@ tabs the original workbook had, so there is always a copy readable in Excel
 without the app.</p>
 <hr>
 <h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="failed-to-start-it-launched-but-is-not-listening">"FAILED to start - it launched but is not listening"</h3>
+<p>Check whether it actually failed before doing anything about it:</p>
+<pre><code class="language-bash">netstat -ln | grep :8503
+curl -s localhost:8503/healthz
+</code></pre>
+<p>If it is listening, it started and the script gave up too early. <code>run.sh</code> now
+waits up to 45 seconds (<code>PW_STARTUP_TIMEOUT</code>) rather than a fixed three, because
+startup applies the schema, adds any missing columns and views and writes the
+seed rows before it binds — which on this NAS takes longer than three seconds
+since the workout tables were added.</p>
+<p>If it is <strong>not</strong> listening, the log is worth reading now: <code>run.sh</code> runs Python
+with <code>-u</code>, so everything printed on the way up reaches <code>data/server.log</code> instead
+of sitting in a buffer. A start that fails with an empty log used to be the
+normal outcome and is now a real signal.</p>
+<p>Either way <code>stop.sh</code> can find the process, with or without a pid file — it falls
+back to scanning <code>/proc</code> for one running <code>serve.py --port 8503</code>.</p>
 <p><strong><code>run.sh</code> reports it failed to start.</strong> It waits three seconds and checks
 whether anything is listening, printing the last few log lines if not. The most
 likely cause is code that needs Python 3.10 reaching the NAS's 3.9 — run
