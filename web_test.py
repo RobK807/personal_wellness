@@ -115,13 +115,15 @@ def workout_tracker(client) -> None:
     worked out by hand: a 100 kg bench press, so every percentage is its own
     number of kilograms.
     """
-    from core import workout_queries as wq, workouts
+    from core import (workout_mutations as wm, workout_queries as wq,
+                      workouts)
 
     print("\nworkout tracker: the empty state")
-    body = client.get("/workouts/").get_data(as_text=True)
+    body = client.get("/workouts/plan").get_data(as_text=True)
     check("says there are no plans", "Nothing here yet" in body, True)
     check("the exercise catalogue is seeded", len(wq.exercises()), 24)
-    for path in ["/workouts/", "/workouts/tracker", "/workouts/exercises"]:
+    for path in ["/workouts/", "/workouts/plan", "/workouts/tracker",
+                 "/workouts/exercises"]:
         check(f"GET {path}", client.get(path).status_code, 200)
 
     print("\nworkout tracker: creating a plan")
@@ -286,8 +288,90 @@ def workout_tracker(client) -> None:
           lookup["Goblet Squat"] in
           {row["id"] for row in wq.exercises(include_retired=True)}, True)
 
+
+    print("\nworkout tracker: the session page")
+    # A second week and session, so "next up" has somewhere to move to.
+    client.post(f"/workouts/plan/{plan['id']}/week", data={"number": "3"},
+                follow_redirects=True)
+    third = wq.week_number(plan["id"], 3)
+    client.post(f"/workouts/build?week={third['id']}",
+                data={**form, "number": "1"}, follow_redirects=True)
+
+    body = client.get("/workouts/").get_data(as_text=True)
+    check("opens without being told which plan", "<h1>" in body, True)
+    # With no plan named it opens on current_plan() - the most recently trained,
+    # else the newest - which by this point in the test is the copy. Ask for the
+    # one whose sessions we know about.
+    body = client.get(f"/workouts/?plan={plan['id']}").get_data(as_text=True)
+    check("has all three dropdowns",
+          all(f'id="{name}"' in body for name in ("plan", "week", "session")),
+          True)
+    # Nothing is ticked off at this point, so the first session of week 1 is due.
+    due = wq.next_session(plan["id"])
+    check("opens on the session that is due",
+          f'value="{due["id"]}" selected' in body.replace("  ", " "), True)
+
+    wm.tick_session(due["id"], True)
+    moved = client.get(
+        f"/workouts/?plan={plan['id']}").get_data(as_text=True)
+    after = wq.next_session(plan["id"])
+    check("and moves on once that one is done", after["id"] != due["id"], True)
+    check("to the next one", f'value="{after["id"]}" selected'
+          in moved.replace("  ", " "), True)
+    wm.tick_session(due["id"], False)
+
+    check("a stale week id falls back rather than 404ing",
+          client.get("/workouts/?week=999999").status_code, 200)
+    check("so does a stale session id",
+          client.get("/workouts/?session=999999").status_code, 200)
+    check("and a stale plan id is still a 404",
+          client.get("/workouts/?plan=999999").status_code, 404)
+
+    one = client.get(f"/workouts/?plan={plan['id']}&week={week['id']}"
+                     f"&session={session['id']}").get_data(as_text=True)
+    check("shows the sets", "50 kg" in one and "Bodyweight +5 kg" in one, True)
+    check("and only this session's exercises",
+          one.count("<h3>Bench Press"), 1)
+    check("with the tick above them",
+          one.index("Tick it off") < one.index("<h3>Bench Press"), True)
+    check("a per-side movement is flagged", "per side" in one, True)
+    # Jinja renders None as the string "None" - a set with a rest but no cue
+    # once read "60sNone" on the page.
+    check("no stray Nones", "None" in one, False)
+
+    print("\nworkout tracker: phases read down, not across")
+    plan_body = client.get(
+        f"/workouts/plan?plan={plan['id']}").get_data(as_text=True)
+    check("the phase picker is a dropdown", 'id="phase"' in plan_body, True)
+    check("and its parts are a labelled list",
+          all(f"<dt>{label}</dt>" in plan_body
+              for label in ("Weeks", "Warm-up", "Working", "Working sets")),
+          True)
+    check("a stale phase id falls back to the first",
+          client.get(f"/workouts/plan?plan={plan['id']}&phase=999999").status_code,
+          200)
+
+    print("\nworkout tracker: the catalogue is a stack, not a wide table")
+    moves = client.get("/workouts/exercises").get_data(as_text=True)
+    check("one card per movement",
+          moves.count('class="panel move'), len(wq.exercises(True)))
+    check("every name is in its summary",
+          all(f'<span class="move-name">{row["name"]}</span>' in moves
+              for row in wq.exercises()), True)
+    check("the flags read as tags",
+          'class="tag">bodyweight</span>' in moves
+          and 'class="tag">per side</span>' in moves, True)
+    check("and editing still works from there",
+          "flash flash-error" in client.post(
+              "/workouts/exercises",
+              data={"exercise_id": lookup["Bench Press"], "action": "save",
+                    "name": "Bench Press", "reps_mode": "total",
+                    "weight_mode": "total"},
+              follow_redirects=True).get_data(as_text=True), False)
+
     print("\nworkout tracker: every page with a plan in it")
-    for path in ["/workouts/", "/workouts/tracker", "/workouts/exercises",
+    for path in ["/workouts/", "/workouts/plan", "/workouts/tracker",
+                 "/workouts/exercises",
                  f"/workouts/week/{week['id']}",
                  f"/workouts/build?week={week['id']}",
                  f"/workouts/build?session={session['id']}"]:

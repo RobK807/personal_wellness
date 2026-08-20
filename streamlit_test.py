@@ -44,6 +44,7 @@ PAGES = [
     ("views.runs.records",          "render"),
     ("views.runs.data_page",        "render"),
     ("views.runs.admin_page",       "render"),
+    ("views.workouts.session_page",   "render"),
     ("views.workouts.plan_page",      "render"),
     ("views.workouts.build_page",     "render"),
     ("views.workouts.tracker_page",   "render"),

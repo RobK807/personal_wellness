@@ -24,6 +24,7 @@ from views.runs import (admin_page as runs_admin, analysis as runs_analysis,
 from views.weigh_in import (admin_page, changes_page, charts_page, data_page,
                             input_page, overview)
 from views.workouts import (build_page as workouts_build,
+                            session_page as workouts_session,
                             exercises_page as workouts_exercises,
                             plan_page as workouts_plan,
                             tracker_page as workouts_tracker)
@@ -65,9 +66,12 @@ PAGES = {
         ("Admin",     ":material/settings:",      "runs-admin",       runs_admin.render),
     ],
     "workouts": [
-        ("Plan",      ":material/calendar_month:", "workouts",           workouts_plan.render),
+        # Session first, so the sidebar lands on the workout that is due rather
+        # than on the machinery for planning one.
+        ("Session",   ":material/fitness_center:", "workouts",           workouts_session.render),
+        ("Plan",      ":material/calendar_month:", "workouts-plan",      workouts_plan.render),
         ("Build",     ":material/construction:",   "workouts-build",     workouts_build.render),
-        ("Tracker",   ":material/fitness_center:", "workouts-track",     workouts_tracker.render),
+        ("Tracker",   ":material/check_circle:",   "workouts-track",     workouts_tracker.render),
         ("Exercises", ":material/list:",           "workouts-exercises", workouts_exercises.render),
     ],
     "diet": [

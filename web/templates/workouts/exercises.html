@@ -56,64 +56,92 @@
 </div>
 
 <h2>The catalogue</h2>
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr><th>Exercise</th><th>Reps</th><th>Weight</th><th>Type</th>
-          <th class="num">Sessions</th><th>Note</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for row in catalogue %}
-      <tr {{ 'class=muted' if row.retired }}>
-        <td>
-          <form method="post" action="{{ url_for('workouts.exercises') }}"
-                style="display:flex;gap:.3rem;align-items:center">
-            <input type="hidden" name="exercise_id" value="{{ row.id }}">
-            <input type="text" name="name" value="{{ row.name }}" required>
-            <select name="reps_mode">
+<p class="caption">{{ catalogue | length }} movements. Tap one to change it.</p>
+
+{# A stack rather than a table. Every exercise had a name, three dropdowns and
+   two buttons in one row, which on a 375px phone pushed the name and the
+   dropdowns off the side - so the row that mattered was the one you could not
+   read. Each is now a card that says what it is at a glance, with the form
+   folded away behind it. #}
+<div class="moves">
+  {% for row in catalogue %}
+  <details class="panel move {{ 'retired' if row.retired }}">
+    <summary>
+      <span class="move-name">{{ row.name }}</span>
+      <span class="move-tags">
+        {%- if row.is_bodyweight %}<span class="tag">bodyweight</span>{% endif %}
+        {%- if row.reps_mode == 'per_side' %}<span class="tag">per side</span>{% endif %}
+        {%- if row.weight_mode == 'per_dumbbell' %}<span class="tag">per dumbbell</span>{% endif %}
+        {%- if row.retired %}<span class="tag warn">retired</span>{% endif %}
+        {%- if row.sessions %}<span class="tag quiet">{{ row.sessions }}
+          session{{ '' if row.sessions == 1 else 's' }}</span>{% endif %}
+      </span>
+    </summary>
+    <div>
+      <form method="post" action="{{ url_for('workouts.exercises') }}">
+        <input type="hidden" name="exercise_id" value="{{ row.id }}">
+        <div class="field">
+          <label for="name_{{ row.id }}">Name</label>
+          <input type="text" id="name_{{ row.id }}" name="name"
+                 value="{{ row.name }}" required>
+        </div>
+        <div class="row three">
+          <div class="field">
+            <label for="reps_{{ row.id }}">Reps counted</label>
+            <select id="reps_{{ row.id }}" name="reps_mode">
               {% for mode in reps_modes %}
               <option value="{{ mode }}" {{ 'selected' if row.reps_mode == mode }}>
                 {{ reps_mode_labels[mode] }}</option>
               {% endfor %}
             </select>
-            <select name="weight_mode">
+          </div>
+          <div class="field">
+            <label for="weight_{{ row.id }}">Weight counted</label>
+            <select id="weight_{{ row.id }}" name="weight_mode">
               {% for mode in weight_modes %}
               <option value="{{ mode }}" {{ 'selected' if row.weight_mode == mode }}>
                 {{ weight_mode_labels[mode] }}</option>
               {% endfor %}
             </select>
-            <select name="is_bodyweight">
+          </div>
+          <div class="field">
+            <label for="bw_{{ row.id }}">Type</label>
+            <select id="bw_{{ row.id }}" name="is_bodyweight">
               <option value="">Has a 1RM</option>
-              <option value="1" {{ 'selected' if row.is_bodyweight }}>Bodyweight</option>
+              <option value="1" {{ 'selected' if row.is_bodyweight }}>
+                Bodyweight (+ added)</option>
             </select>
-            <input type="hidden" name="note" value="{{ row.note or '' }}">
-            <button class="small" type="submit" name="action" value="save">Save</button>
-          </form>
-        </td>
-        <td class="small muted">{{ reps_mode_labels[row.reps_mode] }}</td>
-        <td class="small muted">{{ weight_mode_labels[row.weight_mode] }}</td>
-        <td class="small muted">{{ 'Bodyweight' if row.is_bodyweight else '' }}</td>
-        <td class="num">{{ row.sessions or '' }}</td>
-        <td class="small muted">{{ row.note or '' }}</td>
-        <td>
-          <form method="post" action="{{ url_for('workouts.exercises') }}" style="display:inline">
-            <input type="hidden" name="exercise_id" value="{{ row.id }}">
-            {% if row.retired %}
-            <button class="small" type="submit" name="action" value="restore">Restore</button>
-            {% else %}
-            <button class="small" type="submit" name="action" value="retire">Retire</button>
-            {% endif %}
-            {% if not row.sessions %}
-            <button class="small danger" type="submit" name="action" value="delete"
-                    onclick="return confirm('Delete {{ row.name }}?')">Delete</button>
-            {% endif %}
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </div>
+        </div>
+        <div class="field">
+          <label for="note_{{ row.id }}">Note</label>
+          <input type="text" id="note_{{ row.id }}" name="note"
+                 value="{{ row.note or '' }}">
+        </div>
+        <p class="actions">
+          <button class="primary" type="submit" name="action" value="save">Save</button>
+          {% if row.retired %}
+          <button type="submit" name="action" value="restore">Put back in the dropdowns</button>
+          {% else %}
+          <button type="submit" name="action" value="retire">Retire</button>
+          {% endif %}
+          {% if not row.sessions %}
+          <button class="danger" type="submit" name="action" value="delete"
+                  onclick="return confirm('Delete {{ row.name }}?')">Delete</button>
+          {% endif %}
+        </p>
+      </form>
+      {% if row.sessions %}
+      <p class="small muted">Used by {{ row.sessions }}
+        session{{ '' if row.sessions == 1 else 's' }}, so it cannot be deleted —
+        retiring takes it out of the dropdowns and leaves those sessions reading
+        exactly as they do now.</p>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
 </div>
+
 <p class="caption">
   <strong>Retire</strong> takes a movement out of the dropdowns and leaves every
   plan using it reading exactly as it did. <strong>Delete</strong> only appears

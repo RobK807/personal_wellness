@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}{{ (session | sessiontitle) if session else 'Session' }} · Workouts{% endblock %}
+
+{% block content %}
+<h1>{{ (session | sessiontitle) if session else 'Session' }}</h1>
+
+{# Three dropdowns, each submitting on change. Nothing else on the page, because
+   this is the one that gets read standing up holding a phone. #}
+<form class="filters" method="get" action="{{ url_for('workouts.session') }}">
+  <div class="field">
+    <label for="plan">Plan</label>
+    <select id="plan" name="plan" onchange="this.form.submit()">
+      {% for option in plans %}
+      <option value="{{ option.id }}" {{ 'selected' if option.id == plan.id }}>
+        {{ option.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="week">Week</label>
+    <select id="week" name="week" onchange="this.form.submit()">
+      {% for option in weeks %}
+      <option value="{{ option.id }}" {{ 'selected' if week and option.id == week.id }}>
+        Week {{ option.number }}{{ ' · ' ~ option.label if option.label }}
+        {{- ' · ' ~ option.phase_name if option.phase_name }}
+        ({{ option.sessions_done }}/{{ option.sessions }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="session">Session</label>
+    <select id="session" name="session" onchange="this.form.submit()">
+      {% for option in sessions %}
+      <option value="{{ option.id }}" {{ 'selected' if session and option.id == session.id }}>
+        {{ '✓ ' if option.done }}{{ option | sessiontitle }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <p class="actions"><noscript><button type="submit">Show</button></noscript></p>
+</form>
+
+{% if not session %}
+<p class="muted">
+  {% if not weeks %}This plan has no weeks yet —
+    <a href="{{ url_for('workouts.plan', plan=plan.id) }}">add one</a>.
+  {% else %}Nothing planned for that week yet —
+    <a href="{{ url_for('workouts.build', week=week.id) }}">build a session</a>.
+  {% endif %}
+</p>
+{% else %}
+
+<p class="caption">
+  {{ plan.name }} · {{ week | weektitle }}
+  {%- if week.phase_name %} · {{ week.phase_name }}{% endif %}
+  {%- if session.done %} · <strong>done {{ session.done_on | period }}</strong>{% endif %}
+</p>
+
+{# The tick, at the top where it can be reached without scrolling past the
+   whole session. #}
+<div class="card">
+  <form method="post" action="{{ url_for('workouts.tick', session_id=session.id) }}">
+    <input type="hidden" name="next"
+           value="{{ url_for('workouts.session', plan=plan.id, week=week.id, session=session.id) }}">
+    {% if session.done %}
+    <input type="hidden" name="done" value="0">
+    <p class="actions">
+      <span class="small muted">Ticked off {{ session.done_on | period }}{{
+        ' — ' ~ session.done_note if session.done_note }}</span>
+      <button class="small" type="submit">Un-tick</button>
+    </p>
+    {% else %}
+    <input type="hidden" name="done" value="1">
+    <div class="row three">
+      <div class="field">
+        <label for="done_on">Done on</label>
+        <input type="date" id="done_on" name="done_on"
+               value="{{ today.isoformat() }}" max="{{ today.isoformat() }}">
+      </div>
+      <div class="field">
+        <label for="note">How it went</label>
+        <input type="text" id="note" name="note" placeholder="optional">
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Tick it off</button></p>
+    {% endif %}
+  </form>
+</div>
+
+{# One card per exercise rather than one table for the session. A set has five
+   things to say about it and a phone is 375px wide, so the sets are a table and
+   the exercise name is a heading above it - which is what stops the whole thing
+   needing a sideways scroll to find out what you are meant to be lifting. #}
+{% for item in sheet %}
+<div class="card">
+  <h3>{{ item.name }}
+    {% if item.resolved_reps_mode == 'per_side' or item.resolved_weight_mode == 'per_dumbbell' %}
+    <span class="rung-km">
+      {%- if item.resolved_reps_mode == 'per_side' %}per side{% endif %}
+      {%- if item.resolved_reps_mode == 'per_side' and item.resolved_weight_mode == 'per_dumbbell' %} ·
+      {% endif %}
+      {%- if item.resolved_weight_mode == 'per_dumbbell' %}per dumbbell{% endif %}</span>
+    {% endif %}
+  </h3>
+  <table class="sets">
+    <thead>
+      <tr><th>Set</th><th class="num">Reps</th><th class="num">Weight</th></tr>
+    </thead>
+    <tbody>
+      {% for row in item.sets %}
+      <tr>
+        <td>
+          <span class="set-type">{{ row.set_type | replace('warmup', 'Warm-up') | capitalize }}</span>
+          <span class="set-number">{{ row | setlabel }}</span>
+        </td>
+        <td class="num">{{ row | reps }}</td>
+        <td class="num">{{ row | load }}</td>
+      </tr>
+      {% if row.rest or row.cue %}
+      <tr class="set-aside">
+        <td colspan="3" class="small muted">
+          {{- row.rest or '' }}{{ ' · ' if row.rest and row.cue }}{{ row.cue or '' }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if item.note %}<p class="small muted">{{ item.note }}</p>{% endif %}
+</div>
+{% endfor %}
+
+{% if week.note %}
+<div class="card">
+  <h3>Week {{ week.number }} notes</h3>
+  <ul class="small">
+    {% for line in week.note.split('\n') %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<p class="actions">
+  {% if neighbours.previous %}
+  <a class="button" href="{{ url_for('workouts.session', plan=plan.id,
+     week=neighbours.previous.week_id, session=neighbours.previous.id) }}">← Previous</a>
+  {% endif %}
+  {% if neighbours.next %}
+  <a class="button" href="{{ url_for('workouts.session', plan=plan.id,
+     week=neighbours.next.week_id, session=neighbours.next.id) }}">Next →</a>
+  {% endif %}
+  <a class="button small" href="{{ url_for('workouts.week', week_id=week.id) }}">Whole week</a>
+  <a class="button small" href="{{ url_for('workouts.build', session=session.id) }}">Edit</a>
+</p>
+{% endif %}
+{% endblock %}

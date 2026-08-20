@@ -1,7 +1,9 @@
 """The workout plan and tracker.
 
-Five pages:
+Six pages:
 
+    session     one session, picked with three dropdowns - the landing page,
+                because it is the one that gets used standing up in a gym
     plan        pick a plan, see its phases, 1RMs and weeks
     week        one week as the workbook lays it out, session by session
     build       the session builder - one session at a time
@@ -54,10 +56,26 @@ def _shell(plan, **extra) -> dict:
     return {"plan": plan, "plans": wq.plans(), **extra}
 
 
+def _pick(rows: list, wanted: int | None, key: str = "id"):
+    """The row asked for, else the first. What a dropdown-driven page needs.
+
+    Falling back rather than 404ing, because the id in the query string is
+    usually stale rather than wrong - a plan was switched underneath it - and
+    showing the first phase of the plan you are looking at beats an error page.
+    """
+    if not rows:
+        return None
+    if wanted is not None:
+        for row in rows:
+            if row[key] == wanted:
+                return row
+    return rows[0]
+
+
 # --------------------------------------------------------------------------- #
 # Plan
 # --------------------------------------------------------------------------- #
-@bp.route("/")
+@bp.route("/plan")
 @login_required
 def plan():
     row = _selected_plan()
@@ -65,10 +83,15 @@ def plan():
         return render_template("workouts/empty.html",
                                workbook=config.GYM_XLSX,
                                exercises=len(wq.exercises()))
+    phases = wq.phases(row["id"])
     return render_template(
         "workouts/plan.html",
         **_shell(row),
-        phases=wq.phases(row["id"]),
+        phases=phases,
+        # One phase at a time, picked from a dropdown. Seven columns of scheme
+        # is a table nobody can read on a phone, and the parts of a phase are a
+        # list of labelled values rather than a row of anything.
+        chosen_phase=_pick(phases, request.args.get("phase", type=int)),
         maxes=wq.maxes(row["id"]),
         weeks=wq.weeks(row["id"]),
         totals=wq.totals(row["id"]),
@@ -184,6 +207,81 @@ def delete_week(week_id: int):
     wm.delete_week(week_id)
     flash(f"Deleted week {week['number']}.", "ok")
     return redirect(url_for("workouts.plan", plan=week["plan_id"]))
+
+
+# --------------------------------------------------------------------------- #
+# One session - the page you open at the gym
+# --------------------------------------------------------------------------- #
+@bp.route("/")
+@login_required
+def session():
+    """Plan, week, session as three dropdowns, and nothing else on the page.
+
+    The section's landing page - it owns /workouts/ itself, the way every other
+    section's landing page owns its root - because it is the one that gets used
+    standing up holding a phone. Everything else here is planning, which happens sitting
+    down: getting to a session through the plan, then the week, then reading the
+    right half of a table was three taps and a horizontal scroll too many.
+
+    It opens on the next session not ticked off. Changing the plan or the week
+    re-picks within it rather than 404ing, so the dropdowns can be moved in any
+    order without ever landing on nothing - see _pick().
+    """
+    plan = _selected_plan()
+    if plan is None:
+        return render_template("workouts/empty.html",
+                               workbook=config.GYM_XLSX,
+                               exercises=len(wq.exercises()))
+
+    weeks = wq.weeks(plan["id"])
+    wanted_session = request.args.get("session", type=int)
+    wanted_week = request.args.get("week", type=int)
+
+    # With nothing asked for, open on what is due next. The week follows from
+    # the session rather than being chosen separately, so the two cannot
+    # disagree about which week is being looked at.
+    if wanted_session is None and wanted_week is None:
+        due = wq.next_session(plan["id"])
+        if due is not None:
+            wanted_session, wanted_week = due["id"], due["week_id"]
+
+    week = _pick(weeks, wanted_week)
+    if week is None:
+        return render_template("workouts/session.html", **_shell(plan),
+                               weeks=[], week=None, sessions=[], session=None,
+                               sheet=[], today=dt.date.today())
+
+    sessions = wq.sessions(week_id=week["id"])
+    chosen = _pick(sessions, wanted_session)
+    return render_template(
+        "workouts/session.html",
+        **_shell(plan),
+        weeks=weeks,
+        week=week,
+        sessions=sessions,
+        session=chosen,
+        sheet=wq.session_sheet(chosen["id"]) if chosen else [],
+        neighbours=_neighbours(plan["id"], chosen),
+        today=dt.date.today(),
+    )
+
+
+def _neighbours(plan_id: int, current) -> dict:
+    """The session before and after this one, across week boundaries.
+
+    So a session can be stepped through without going back to the dropdowns,
+    which is what you want between the last set of one and the warm-up of the
+    next.
+    """
+    if current is None:
+        return {"previous": None, "next": None}
+    ordered = wq.sessions(plan_id=plan_id)
+    index = next((i for i, row in enumerate(ordered)
+                  if row["id"] == current["id"]), None)
+    if index is None:
+        return {"previous": None, "next": None}
+    return {"previous": ordered[index - 1] if index > 0 else None,
+            "next": ordered[index + 1] if index + 1 < len(ordered) else None}
 
 
 # --------------------------------------------------------------------------- #

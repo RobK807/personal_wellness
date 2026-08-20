@@ -31,6 +31,9 @@ PAGES = {
         ("runs.admin",           "Admin",    "Admin"),
     ],
     "workouts": [
+        # Session first, so the sidebar's "Workout plan" lands on the workout
+        # that is due rather than on the machinery for planning one.
+        ("workouts.session",     "Session",  "Session"),
         ("workouts.plan",        "Plan",     "Plan"),
         ("workouts.build",       "Build",    "Build a session"),
         ("workouts.tracker",     "Track",    "Tracker"),

@@ -14,6 +14,7 @@
   </div>
   <p class="actions">
     <noscript><button type="submit">Show</button></noscript>
+    <a class="button small primary" href="{{ url_for('workouts.session', plan=plan.id if plan) }}">Session</a>
     <a class="button small" href="{{ url_for('workouts.plan', plan=plan.id if plan) }}">Plan</a>
     <a class="button small" href="{{ url_for('workouts.tracker', plan=plan.id if plan) }}">Tracker</a>
     <a class="button small" href="{{ url_for('workouts.exercises') }}">Exercises</a>

@@ -86,21 +86,47 @@ def _maxes(plan: dict) -> None:
 
 
 def _phases(plan: dict) -> None:
+    """One phase at a time, read down rather than across.
+
+    Seven columns of scheme is a table nobody can read on a phone, and the parts
+    of a phase are a list of labelled values rather than a row of anything.
+    """
     st.subheader("Phases")
     rows = wq.phases(plan["id"])
-    if rows:
-        st.dataframe([{
-            "Phase": row["name"], "Focus": row["focus"] or "",
-            "Weeks": row["weeks"],
-            "Warm-up": workouts.fmt_percent_list(row["warmup_pcts"]),
-            "Working": workouts.fmt_percent_list(row["working_pcts"]),
-            "Sets × reps": f"{row['working_sets'] or '-'} × "
-                           f"{row['working_reps'] or '-'}",
-            "Accessories": f"{row['accessory_sets'] or '-'} × "
-                           f"{row['accessory_reps'] or '-'}",
-        } for row in rows], hide_index=True, width="stretch")
-    else:
+    if not rows:
         st.caption("No phases yet.")
+        return
+
+    labels = {row["id"]: row["name"] + (f" — {row['focus']}"
+                                        if row["focus"] else "")
+              for row in rows}
+    chosen = st.selectbox("Phase", list(labels),
+                          format_func=lambda value: labels[value],
+                          key="phase_pick")
+    phase = next(row for row in rows if row["id"] == chosen)
+    numbers = [week["number"] for week in wq.weeks(plan["id"])
+               if week["phase_id"] == phase["id"]]
+
+    facts = []
+    if phase["focus"]:
+        facts.append(("Focus", phase["focus"]))
+    facts += [
+        ("Weeks", f"{phase['weeks']}"
+                  + (f" — {', '.join(str(n) for n in numbers)}"
+                     if numbers else "")),
+        ("Warm-up", f"{workouts.fmt_percent_list(phase['warmup_pcts'])} of 1RM"),
+        ("Working", f"{workouts.fmt_percent_list(phase['working_pcts'])} of 1RM"),
+        ("Working sets", f"{phase['working_sets'] or '-'} × "
+                         f"{phase['working_reps'] or '-'} reps"),
+        ("Accessories", f"{phase['accessory_sets'] or '-'} × "
+                        f"{phase['accessory_reps'] or '-'} reps"),
+    ]
+    if phase["rest_working"]:
+        facts.append(("Rest", f"{phase['rest_warmup']} warm-up · "
+                              f"{phase['rest_working']} working · "
+                              f"{phase['rest_accessory']} accessory"))
+    st.dataframe([{"": label, " ": value} for label, value in facts],
+                 hide_index=True, width="stretch")
 
     with st.expander("Add or change a phase"):
         st.caption("Everything here is a default the session builder pre-fills "

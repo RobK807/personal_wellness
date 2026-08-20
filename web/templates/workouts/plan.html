@@ -81,30 +81,47 @@
 </div>
 
 <h2>Phases</h2>
-<div class="card">
-  <table class="compact">
-    <thead>
-      <tr><th>Phase</th><th>Focus</th><th class="num">Weeks</th>
-          <th>Warm-up</th><th>Working</th><th class="num">Sets × reps</th>
-          <th class="num">Accessories</th></tr>
-    </thead>
-    <tbody>
+{% if chosen_phase %}
+{# One at a time. Seven columns of scheme is a table nobody can read on a
+   phone, and the parts of a phase are a list of labelled values rather than a
+   row of anything. #}
+<form class="filters" method="get" action="{{ url_for('workouts.plan') }}">
+  <input type="hidden" name="plan" value="{{ plan.id }}">
+  <div class="field">
+    <label for="phase">Phase</label>
+    <select id="phase" name="phase" onchange="this.form.submit()">
       {% for row in phases %}
-      <tr>
-        <td><strong>{{ row.name }}</strong></td>
-        <td class="small">{{ row.focus or '' }}</td>
-        <td class="num">{{ row.weeks }}</td>
-        <td class="num">{{ row.warmup_pcts | pcts }}</td>
-        <td class="num">{{ row.working_pcts | pcts }}</td>
-        <td class="num">{{ row.working_sets or '-' }} × {{ row.working_reps or '-' }}</td>
-        <td class="num">{{ row.accessory_sets or '-' }} × {{ row.accessory_reps or '-' }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="7" class="muted">No phases — add one below.</td></tr>
+      <option value="{{ row.id }}" {{ 'selected' if row.id == chosen_phase.id }}>
+        {{ row.name }}{{ ' — ' ~ row.focus if row.focus }}</option>
       {% endfor %}
-    </tbody>
-  </table>
+    </select>
+  </div>
+  <p class="actions"><noscript><button type="submit">Show</button></noscript></p>
+</form>
+<div class="card">
+  <h3>{{ chosen_phase.name }}</h3>
+  <dl class="facts">
+    {% if chosen_phase.focus %}<dt>Focus</dt><dd>{{ chosen_phase.focus }}</dd>{% endif %}
+    <dt>Weeks</dt>
+    <dd>{{ chosen_phase.weeks }}
+      {%- set numbers = weeks | selectattr('phase_id', 'equalto', chosen_phase.id)
+                              | map(attribute='number') | list %}
+      {%- if numbers %} — {{ numbers | join(', ') }}{% endif %}</dd>
+    <dt>Warm-up</dt><dd>{{ chosen_phase.warmup_pcts | pcts }} of 1RM</dd>
+    <dt>Working</dt><dd>{{ chosen_phase.working_pcts | pcts }} of 1RM</dd>
+    <dt>Working sets</dt>
+    <dd>{{ chosen_phase.working_sets or '-' }} × {{ chosen_phase.working_reps or '-' }} reps</dd>
+    <dt>Accessories</dt>
+    <dd>{{ chosen_phase.accessory_sets or '-' }} × {{ chosen_phase.accessory_reps or '-' }} reps</dd>
+    {% if chosen_phase.rest_working %}
+    <dt>Rest</dt>
+    <dd>{{ chosen_phase.rest_warmup }} warm-up · {{ chosen_phase.rest_working }} working
+      · {{ chosen_phase.rest_accessory }} accessory</dd>{% endif %}
+  </dl>
 </div>
+{% else %}
+<p class="muted">No phases — add one below.</p>
+{% endif %}
 
 <details class="panel">
   <summary>Add or change a phase</summary>

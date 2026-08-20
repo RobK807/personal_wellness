@@ -481,6 +481,10 @@ because a later phase was re-planned.</p>
 </thead>
 <tbody>
 <tr>
+<td><strong>Session</strong></td>
+<td>One session, picked with three dropdowns. The landing page</td>
+</tr>
+<tr>
 <td><strong>Plan</strong></td>
 <td>Pick a plan, see its phases, 1RMs and weeks; copy it as a template</td>
 </tr>
@@ -498,6 +502,17 @@ because a later phase was re-planned.</p>
 </tr>
 </tbody>
 </table></div>
+<p><strong>Session owns <code>/workouts/</code></strong> — the section's front door is the workout that is
+due, not the machinery for planning one. It opens on the first session not
+ticked off, the tick sits above the sets rather than below them, and moving
+either of the other two dropdowns re-picks within the new choice rather than
+landing on nothing.</p>
+<p>That page and the two beside it are built for a 375px phone, which is where they
+actually get read. A set is three columns and never more — what kind of set, how
+many reps, what to put on the bar — with rest and the cue on a line underneath
+where they cost no width; a phase is a dropdown and a list of labelled values
+rather than seven columns; and the exercise catalogue is a card per movement
+rather than a row whose name and three dropdowns fall off the side.</p>
 <p>The builder takes one session at a time on purpose. Generating a whole cycle from
 a form would need every variation expressed as parameters before you could see
 any of it; building one and copying the week gets there faster and shows you what

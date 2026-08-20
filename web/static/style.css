@@ -342,6 +342,37 @@ table.compact { width: 100%; margin-top: .4rem; }
 table.compact th, table.compact td { padding: .25rem .4rem; font-size: .85rem; }
 table.compact tr.flagged td { color: var(--bad); font-weight: 600; }
 
+/* ---------- workouts ---------- */
+/* The session page is read standing up on a phone, so a set is three columns
+   and never more: what kind of set it is, how many reps, what to put on the
+   bar. Rest and the cue go on a line of their own underneath, where they cost
+   no width. */
+table.sets { table-layout: fixed; }
+table.sets th, table.sets td { padding: .45rem .5rem; }
+table.sets .set-type { display: inline-block; min-width: 4.5rem;
+                       color: var(--muted); font-size: .8rem; }
+table.sets .set-number { font-variant-numeric: tabular-nums; font-weight: 600; }
+table.sets tr.set-aside td { border-bottom: 1px solid var(--border);
+                             padding-top: 0; padding-bottom: .45rem; }
+table.sets tr:not(.set-aside) td { border-bottom: 0; }
+
+/* The exercise catalogue: one card per movement, because the same thing as a
+   row put the name and all three dropdowns off the side of a phone. The tags
+   say what the flags are without opening anything. */
+.moves { display: grid; gap: .5rem; }
+.moves .move { margin-bottom: 0; }
+.moves .move summary { display: flex; flex-wrap: wrap; align-items: baseline;
+                       gap: .4rem .6rem; }
+.moves .move-name { font-weight: 600; }
+.moves .move-tags { display: flex; flex-wrap: wrap; gap: .3rem; }
+.moves .move.retired .move-name { color: var(--muted);
+                                  text-decoration: line-through; }
+.tag { font-size: .72rem; padding: .1rem .4rem; border-radius: 999px;
+       border: 1px solid var(--border); color: var(--muted);
+       white-space: nowrap; }
+.tag.warn { color: var(--bad); border-color: var(--bad); }
+.tag.quiet { border-color: transparent; }
+
 /* Records: one card per breakdown distance, side by side where there is room. */
 .records { display: grid; gap: 1rem; }
 @media (min-width: 760px) { .records { grid-template-columns: 1fr 1fr; } }

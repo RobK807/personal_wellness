@@ -74,5 +74,9 @@ def week_heading(week: dict) -> str:
     return " · ".join(parts)
 
 
+def set_type_label(row: dict) -> str:
+    return config.SET_TYPE_LABELS.get(row.get("set_type"), row.get("set_type"))
+
+
 def day(value) -> str:
     return metrics.period_label("daily", value) if value else ""
