@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{# `with context`: an imported macro cannot see the template context
+   without it, so macro_keys and macro_labels would be undefined inside
+   these and every macro column would render empty - silently. #}
+{% import "diet/_macros.html" as m with context %}
+{% import "diet/_foodpicker.html" as picker with context %}
+{% block title %}Macro calculator · Diet{% endblock %}
+
+{% block content %}
+<h1>Macro calculator</h1>
+<p class="caption">Build something out of its components, then take a proportion
+  of it. The workbook's Calculator sheet: seven rows make a burrito, and the pan
+  of pancake mix makes rather more than the 200 g that gets eaten.</p>
+
+<form method="post" action="{{ url_for('diet.calculator') }}">
+  {% for slot in slots %}
+  <div class="card entry-row {{ 'blank' if not (form and form.get('c' ~ slot ~ '_food_id')
+                                                  or form and form.get('c' ~ slot ~ '_name')) }}">
+    <div class="row three">
+      <div class="field">
+        <label for="c{{ slot }}_food_id">Component {{ slot }}</label>
+        <select id="c{{ slot }}_food_id" name="c{{ slot }}_food_id" data-macro-source>{{
+          picker.options(catalogue,
+                         (form.get('c' ~ slot ~ '_food_id') | int) if form else none,
+                         '— type it in below —') }}</select>
+      </div>
+      <div class="field">
+        <label for="c{{ slot }}_quantity">Quantity</label>
+        <input type="number" step="any" min="0" id="c{{ slot }}_quantity"
+               name="c{{ slot }}_quantity"
+               value="{{ form.get('c' ~ slot ~ '_quantity', '') if form }}">
+      </div>
+      <div class="field">
+        <label for="c{{ slot }}_units">Units</label>
+        <input type="text" id="c{{ slot }}_units" name="c{{ slot }}_units"
+               list="food-units" value="{{ form.get('c' ~ slot ~ '_units', '') if form }}">
+      </div>
+    </div>
+    <div class="row three">
+      <div class="field">
+        <label for="c{{ slot }}_name">Or a name</label>
+        <input type="text" id="c{{ slot }}_name" name="c{{ slot }}_name"
+               value="{{ form.get('c' ~ slot ~ '_name', '') if form }}"
+               placeholder="something off a packet">
+      </div>
+    </div>
+    <div class="row four">
+      {% for key in macro_keys %}
+      <div class="field">
+        <label for="c{{ slot }}_{{ key }}">{{ macro_labels[key] }}</label>
+        <input type="number" step="any" min="0" id="c{{ slot }}_{{ key }}"
+               name="c{{ slot }}_{{ key }}"
+               value="{{ form.get('c' ~ slot ~ '_' ~ key, '') if form }}">
+      </div>
+      {% endfor %}
+    </div>
+    <p class="small muted">Macros typed here are <em>per unit</em> and multiplied
+      by the quantity. A component from the catalogue is scaled by its portion
+      instead.</p>
+  </div>
+  {% endfor %}
+
+  <div class="card">
+    <div class="row three">
+      <div class="field">
+        <label for="scale">Scaling factor</label>
+        <input type="number" step="any" min="0" id="scale" name="scale"
+               value="{{ scale }}">
+      </div>
+      <div class="field">
+        <p class="small muted">Applied to the total, not to any one row —
+          0.5 for half of it, 0.2 for a fifth. That is the question being asked.</p>
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Work it out</button></p>
+  </div>
+</form>
+
+{% if result %}
+{% if result.components %}
+<h2>{{ result.components | length }} component{{ '' if result.components | length == 1 else 's' }}</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Component</th><th class="num">Amount</th>{{ m.headers() }}</tr>
+    </thead>
+    <tbody>
+      {% for row in result.components %}
+      <tr>
+        <td>{{ row.name }}{% if not row.from_catalogue %}
+          <span class="small muted"> · typed in</span>{% endif %}</td>
+        <td class="num">{{ row | quantity }}</td>
+        {{ m.cells(row) }}
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th colspan="2">Subtotal</th>{{ m.cells(result.subtotal) }}</tr>
+      {% if result.scale != 1 %}
+      <tr><th colspan="2">× {{ '%g' | format(result.scale) }}</th>
+        {{ m.cells(result.total) }}</tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</div>
+
+<h2>Total{% if result.scale != 1 %}, scaled to {{ '%g' | format(result.scale) }}{% endif %}</h2>
+{{ m.tiles(result.total) }}
+
+{# Worth saving when it is a recipe rather than a one-off, which is the only
+   reason the calculator writes anything at all. #}
+<div class="card">
+  <h3>Save this to the catalogue</h3>
+  <form method="post" action="{{ url_for('diet.calculator') }}">
+    {% for slot in slots %}
+      {% for suffix in ['food_id', 'quantity', 'units', 'name'] + macro_keys %}
+      <input type="hidden" name="c{{ slot }}_{{ suffix }}"
+             value="{{ form.get('c' ~ slot ~ '_' ~ suffix, '') if form }}">
+      {% endfor %}
+    {% endfor %}
+    <input type="hidden" name="scale" value="{{ result.scale }}">
+    <input type="hidden" name="action" value="save">
+    <div class="row three">
+      <div class="field">
+        <label for="save_name">Name</label>
+        <input type="text" id="save_name" name="save_name" required>
+      </div>
+      <div class="field">
+        <label for="save_list">List</label>
+        <select id="save_list" name="save_list">
+          {% for name in lists %}
+          <option value="{{ name }}" {{ 'selected' if name == 'Recipes' }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="save_grouping">Grouping</label>
+        <input type="text" id="save_grouping" name="save_grouping" placeholder="optional">
+      </div>
+    </div>
+    <div class="row three">
+      <div class="field">
+        <label for="save_portion">Portion</label>
+        <input type="number" step="any" min="0" id="save_portion" name="save_portion"
+               value="1">
+      </div>
+      <div class="field">
+        <label for="save_units">Units</label>
+        <input type="text" id="save_units" name="save_units" list="food-units"
+               value="Portion">
+      </div>
+    </div>
+    <p class="small muted">The macros above become this food's macros for one
+      portion of it.</p>
+    <p class="actions"><button type="submit">Save to the catalogue</button></p>
+  </form>
+</div>
+{% else %}
+<p class="muted">Nothing filled in yet — pick a food, or type a name and its
+  macros, on any row above.</p>
+{% endif %}
+{% endif %}
+
+<datalist id="food-units">
+  {% for unit in units %}<option value="{{ unit }}">{% endfor %}
+</datalist>
+
+{{ picker.catalogue_json(lookup) }}
+<script>
+(function () {
+  var KEYS = {{ macro_keys | tojson }};
+  var node = document.getElementById('food-catalogue');
+  var FOODS = node ? JSON.parse(node.textContent) : {};
+  document.querySelectorAll('[data-macro-source]').forEach(function (select) {
+    select.addEventListener('change', function () {
+      var row = select.closest('.entry-row');
+      var item = row && FOODS[select.value];
+      if (!item) return;
+      // A catalogue component is scaled server-side by its own portion, so
+      // these boxes are only a starting point for the quantity - and the typed
+      // macros are cleared, because a row cannot be both.
+      var qty = row.querySelector('[name$="_quantity"]');
+      if (qty && !qty.value) qty.value = item.portion || 1;
+      var units = row.querySelector('[name$="_units"]');
+      if (units && !units.value) units.value = item.units || '';
+      KEYS.forEach(function (key) {
+        var box = row.querySelector('[name$="_' + key + '"]');
+        if (box) box.value = '';
+      });
+      var name = row.querySelector('[name$="_name"]');
+      if (name) name.value = '';
+    });
+  });
+})();
+</script>
+{% endblock %}

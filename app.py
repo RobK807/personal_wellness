@@ -17,7 +17,13 @@ import streamlit as st
 
 import config
 from core import db, metrics, queries, runs
-from views import placeholders
+# views/placeholders.py is deliberately not imported: all four sections are
+# built now. It and web/templates/placeholder.html are kept as the shape a
+# fifth section starts in - see the note at the top of that module.
+from views.diet import (analysis_page as diet_analysis,
+                        calculator_page as diet_calculator,
+                        day_page as diet_day, foods_page as diet_foods,
+                        targets_page as diet_targets, week_page as diet_week)
 from views.runs import (admin_page as runs_admin, analysis as runs_analysis,
                         data_page as runs_data, input_page as runs_input,
                         overview as runs_overview, records as runs_records)
@@ -75,8 +81,14 @@ PAGES = {
         ("Exercises", ":material/list:",           "workouts-exercises", workouts_exercises.render),
     ],
     "diet": [
-        ("Log",      ":material/restaurant:",     "diet",             placeholders.diet_log),
-        ("Analysis", ":material/insights:",       "diet-analysis",    placeholders.diet_analysis),
+        # Day first, for the same reason Session leads the workouts: it is the
+        # page opened to answer a question, and the rest is setup.
+        ("Day",        ":material/restaurant:",      "diet",            diet_day.render),
+        ("Week",       ":material/calendar_month:",  "diet-week",       diet_week.render),
+        ("Calculator", ":material/calculate:",       "diet-calculator", diet_calculator.render),
+        ("Catalogue",  ":material/list:",            "diet-foods",      diet_foods.render),
+        ("Targets",    ":material/flag:",            "diet-targets",    diet_targets.render),
+        ("Analysis",   ":material/insights:",        "diet-analysis",   diet_analysis.render),
     ],
 }
 

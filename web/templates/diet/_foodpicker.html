@@ -1,0 +1,29 @@
+{# The catalogue dropdown, and the one copy of the catalogue behind all of them.
+
+   The first cut of this carried each food's portion, units and four macros as
+   data- attributes on every <option>. That is correct and it is also 187 foods
+   times six attributes times eleven dropdowns: the day page came to 579 KB, for
+   a phone on the other end of a Tailscale link. The macros are now written once
+   as JSON and the options carry nothing but their id, which is the same page at
+   about a fifth of the weight.
+
+   Grouped with <optgroup> rather than "(Items)" after every name - it reads
+   better and it is shorter. #}
+
+{% macro options(catalogue, selected=none, blank='— free text —') %}
+<option value="">{{ blank }}</option>
+{% for list_name, rows in catalogue | groupby('list') %}
+<optgroup label="{{ list_name }}">
+  {% for row in rows %}
+  <option value="{{ row.id }}" {{ 'selected' if selected and row.id == selected }}>{{ row.name }}</option>
+  {% endfor %}
+</optgroup>
+{% endfor %}
+{% endmacro %}
+
+{# The lookup the fill-in script reads: food id -> portion, units, macros. Built
+   in the blueprint rather than here, because a template that reshapes data is a
+   template that has to be read to find out what a page contains. #}
+{% macro catalogue_json(lookup) %}
+<script id="food-catalogue" type="application/json">{{ lookup | tojson }}</script>
+{% endmacro %}

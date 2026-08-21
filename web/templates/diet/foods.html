@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Catalogue · Diet{% endblock %}
+
+{% block content %}
+<h1>Catalogue</h1>
+<p class="caption">
+  The three lists behind every dropdown in this section. Not categories of food —
+  a way of finding one: an <strong>Item</strong> is a single thing, a
+  <strong>Meal</strong> is bought or assembled, a <strong>Recipe</strong> is
+  cooked. The same name can sit in two lists, and does: the workbook has
+  "Mashed potato" as both an Item and a Recipe.
+</p>
+
+<form class="filters" method="get" action="{{ url_for('diet.foods') }}">
+  <div class="field">
+    <label for="list">List</label>
+    <select id="list" name="list" onchange="this.form.submit()">
+      <option value="">All {{ counts.values() | sum }}</option>
+      {% for name in lists %}
+      <option value="{{ name }}" {{ 'selected' if name == chosen }}>
+        {{ name }} ({{ counts[name] }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="name">
+  </div>
+  <p class="actions"><button type="submit">Show</button></p>
+</form>
+
+<div class="card">
+  <h3>Add a food</h3>
+  <form method="post" action="{{ url_for('diet.foods') }}">
+    <div class="row three">
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required placeholder="Granny smith apple">
+      </div>
+      <div class="field">
+        <label for="new_list">List</label>
+        <select id="new_list" name="list">
+          {% for name in lists %}
+          <option value="{{ name }}" {{ 'selected' if name == chosen }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="grouping">Grouping</label>
+        <input type="text" id="grouping" name="grouping" list="food-groupings"
+               placeholder="optional">
+      </div>
+    </div>
+    <div class="row three">
+      <div class="field">
+        <label for="portion">Portion</label>
+        <input type="number" step="any" min="0" id="portion" name="portion" value="1">
+      </div>
+      <div class="field">
+        <label for="new_units">Units</label>
+        <input type="text" id="new_units" name="units" list="food-units" value="Portion">
+      </div>
+    </div>
+    <div class="row four">
+      {% for key in macro_keys %}
+      <div class="field">
+        <label for="new_{{ key }}">{{ macro_labels[key] }}</label>
+        <input type="number" step="any" min="0" id="new_{{ key }}" name="{{ key }}"
+               value="0">
+      </div>
+      {% endfor %}
+    </div>
+    <p class="actions"><button class="primary" type="submit">Add</button></p>
+    <p class="small muted">The macros are for <strong>one portion</strong> as
+      given above — 266 kcal per 75 grams, not per gram. Everything else in the
+      section divides by that.</p>
+  </form>
+</div>
+
+<h2>{{ matched }} food{{ '' if matched == 1 else 's' }}{%
+  if page_count > 1 %} — page {{ page }} of {{ page_count }}{% endif %}</h2>
+
+{# A stack of cards rather than a table, the same as the exercise catalogue and
+   for the same reason: a name, four macros, a portion and two buttons is a row
+   no 375px phone can show, and the name is the part that gets pushed off. #}
+<div class="moves">
+  {% for row in catalogue %}
+  <details class="panel move {{ 'retired' if row.retired }}">
+    <summary>
+      <span class="move-name">{{ row.name }}</span>
+      <span class="move-tags">
+        <span class="tag quiet">{{ row.calories | macro('calories') }} kcal /
+          {{ '%g' | format(row.portion) }} {{ row.units }}</span>
+        {%- if row.grouping %}<span class="tag">{{ row.grouping }}</span>{% endif %}
+        {%- if not chosen %}<span class="tag quiet">{{ row.list }}</span>{% endif %}
+        {%- if row.retired %}<span class="tag warn">retired</span>{% endif %}
+        {%- if usage.get(row.id) %}<span class="tag quiet">{{ usage[row.id] }}
+          line{{ '' if usage[row.id] == 1 else 's' }}</span>{% endif %}
+      </span>
+    </summary>
+    <div>
+      <form method="post" action="{{ url_for('diet.foods') }}">
+        <input type="hidden" name="food_id" value="{{ row.id }}">
+        <div class="row three">
+          <div class="field">
+            <label for="name_{{ row.id }}">Name</label>
+            <input type="text" id="name_{{ row.id }}" name="name"
+                   value="{{ row.name }}" required>
+          </div>
+          <div class="field">
+            <label for="list_{{ row.id }}">List</label>
+            <select id="list_{{ row.id }}" name="list">
+              {% for name in lists %}
+              <option value="{{ name }}" {{ 'selected' if name == row.list }}>{{ name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="grouping_{{ row.id }}">Grouping</label>
+            <input type="text" id="grouping_{{ row.id }}" name="grouping"
+                   list="food-groupings" value="{{ row.grouping or '' }}">
+          </div>
+        </div>
+        <div class="row three">
+          <div class="field">
+            <label for="portion_{{ row.id }}">Portion</label>
+            <input type="number" step="any" min="0" id="portion_{{ row.id }}"
+                   name="portion" value="{{ '%g' | format(row.portion) }}">
+          </div>
+          <div class="field">
+            <label for="units_{{ row.id }}">Units</label>
+            <input type="text" id="units_{{ row.id }}" name="units" list="food-units"
+                   value="{{ row.units }}">
+          </div>
+        </div>
+        <div class="row four">
+          {% for key in macro_keys %}
+          <div class="field">
+            <label for="{{ key }}_{{ row.id }}">{{ macro_labels[key] }}</label>
+            <input type="number" step="any" min="0" id="{{ key }}_{{ row.id }}"
+                   name="{{ key }}" value="{{ row[key] }}">
+          </div>
+          {% endfor %}
+        </div>
+        <div class="field">
+          <label for="note_{{ row.id }}">Note</label>
+          <input type="text" id="note_{{ row.id }}" name="note" value="{{ row.note or '' }}">
+        </div>
+        <p class="actions">
+          <button class="primary" type="submit" name="action" value="save">Save</button>
+          {% if row.retired %}
+          <button type="submit" name="action" value="restore">Put back in the dropdowns</button>
+          {% else %}
+          <button type="submit" name="action" value="retire">Retire</button>
+          {% endif %}
+          {% if not usage.get(row.id) %}
+          <button class="danger" type="submit" name="action" value="delete"
+                  onclick="return confirm('Delete {{ row.name }}?')">Delete</button>
+          {% endif %}
+        </p>
+      </form>
+      {% if usage.get(row.id) %}
+      <p class="small muted">On {{ usage[row.id] }} diary
+        line{{ '' if usage[row.id] == 1 else 's' }}, so it cannot be deleted —
+        retiring takes it out of the dropdowns and leaves that history intact.
+        Editing the macros here does <em>not</em> restate those lines: a diary
+        entry carries its own numbers, because the record is of what was eaten.</p>
+      {% endif %}
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">Nothing matches. {% if search %}<a href="{{ url_for('diet.foods',
+    list=chosen) }}">Clear the search</a>.{% endif %}</p>
+  {% endfor %}
+</div>
+
+{% if page_count > 1 %}
+<p class="actions">
+  {% if page > 1 %}
+  <a class="button small" href="{{ url_for('diet.foods', list=chosen, q=search,
+     page=page - 1) }}">← Previous</a>
+  {% endif %}
+  <span class="small muted">Page {{ page }} of {{ page_count }}</span>
+  {% if page < page_count %}
+  <a class="button small" href="{{ url_for('diet.foods', list=chosen, q=search,
+     page=page + 1) }}">Next →</a>
+  {% endif %}
+</p>
+<p class="caption">Searching or picking a list is quicker than turning pages —
+  each card carries a whole edit form, so they are sent forty at a time rather
+  than all {{ counts.values() | sum }} at once.</p>
+{% endif %}
+
+<datalist id="food-units">
+  {% for unit in units %}<option value="{{ unit }}">{% endfor %}
+</datalist>
+<datalist id="food-groupings">
+  {% for name, values in groupings.items() %}
+    {% for value in values %}<option value="{{ value }}">{% endfor %}
+  {% endfor %}
+</datalist>
+{% endblock %}

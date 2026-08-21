@@ -3,9 +3,9 @@
 -- One database, one section at a time. The weigh-in tables come first and are
 -- unchanged from the standalone tracker, so its data/weigh_ins.db can simply be
 -- renamed and the rest appear alongside it on first start. Then the run tables,
--- then the workout ones. Diet has none yet - its pages are placeholders, and
--- inventing a schema for a tracker that has not been designed would be guessing
--- in a place that is expensive to change later.
+-- then the workout ones, then the food ones. Each section was designed from the
+-- workbook it replaces rather than guessed at, which is why they arrived in that
+-- order and why none of them is a general-purpose shape.
 
 PRAGMA foreign_keys = ON;
 
@@ -718,3 +718,189 @@ SELECT
       WHERE v.plan_id = p.id AND v.done = 1)                   AS sessions_done,
     (SELECT MAX(done_on) FROM v_sessions v WHERE v.plan_id = p.id) AS last_done
 FROM plans p;
+
+
+-- ===========================================================================
+-- FOOD PLANNER AND DIARY
+--
+-- Built from `Food Planner v0.1.xlsx`: a Planner sheet that lays out one day,
+-- a Food_Diary that keeps 49 weeks of them side by side, a Food sheet holding
+-- the catalogue, and a DailyCheck for going back over a day already recorded.
+--
+--     food                 one thing you can eat, with its macros per portion
+--     macro_target         a named set of macros, from a date - "Base" etc
+--     food_day             one day: which target applies, and any note
+--      food_entry          one line of it: meal, what, how much, its macros
+--
+-- Four macros and no more. The workbook carried sodium and sugar columns and
+-- they are deliberately not here - see the note on food_entries about why the
+-- macros are stored rather than derived, which is the only place that decision
+-- has any teeth.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- The catalogue: everything with macros attached.
+--
+-- `list` is the workbook's three-way split and it is kept, because it is how
+-- the thing is looked up rather than a category of food: Items are single
+-- things, Meals are bought or assembled, Recipes are cooked. `grouping` is the
+-- sub-heading within a list - Snack, Dessert, Dinner - and the two are not
+-- interchangeable, which is why both are here.
+--
+-- Unique on (list, name) rather than on name: the workbook has "Mashed potato"
+-- twice, once as an Item and once as a Recipe, and they are different things
+-- with different macros.
+--
+-- `portion` and `units` are what the macros are FOR - 100 grams, 1 Bar, 1
+-- Portion - so an entry of 50 grams of something recorded per 100 g is half.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS foods (
+    id         INTEGER PRIMARY KEY,
+    list       TEXT    NOT NULL CHECK (list IN ('Items', 'Meals', 'Recipes')),
+    name       TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    grouping   TEXT,
+    portion    REAL    NOT NULL DEFAULT 1 CHECK (portion > 0),
+    units      TEXT    NOT NULL DEFAULT 'Portion',
+    calories   REAL    NOT NULL CHECK (calories >= 0),
+    carbs      REAL    NOT NULL CHECK (carbs   >= 0),
+    fat        REAL    NOT NULL CHECK (fat     >= 0),
+    protein    REAL    NOT NULL CHECK (protein >= 0),
+    retired    INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1)),
+    note       TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (list, name)
+);
+
+CREATE INDEX IF NOT EXISTS ix_foods_name ON foods (name);
+
+-- ---------------------------------------------------------------------------
+-- A named set of target macros, in force from a date.
+--
+-- Named because the workbook had two - Base and Workout - and a training day
+-- is not a rest day. Dated because a target that changes must not rewrite
+-- history: a day in 2024 is compared against the numbers that applied in 2024,
+-- not against today's. That is the same reason a plan's 1RMs live on the plan.
+--
+-- The row in force for a day is the latest `starts_on` on or before it, which
+-- is what v_food_days works out.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS macro_targets (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL CHECK (length(trim(name)) > 0),
+    starts_on TEXT NOT NULL,                 -- ISO date
+    calories  REAL NOT NULL CHECK (calories > 0),
+    carbs     REAL NOT NULL CHECK (carbs   >= 0),
+    fat       REAL NOT NULL CHECK (fat     >= 0),
+    protein   REAL NOT NULL CHECK (protein >= 0),
+    note      TEXT,
+    UNIQUE (name, starts_on)
+);
+
+-- ---------------------------------------------------------------------------
+-- One day.
+--
+-- A day is planned ahead and then corrected in place - which is what the
+-- workbook's Planner -> Food_Diary -> DailyCheck round trip amounted to, and
+-- how all 297 recorded days were actually produced. There is no separate
+-- "planned" and "actual": there is the day, and it changes until it stops.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS food_days (
+    day         TEXT PRIMARY KEY,            -- ISO date
+    target_name TEXT,                        -- NULL means the default profile
+    note        TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---------------------------------------------------------------------------
+-- One line of a day.
+--
+-- **The macros are stored, not looked up.** That is the opposite of the rule
+-- the run tracker follows for pace, and it is right here for a reason the
+-- imported history makes plain: the diary records what was eaten, the catalogue
+-- records what a food is now, and the second changes. Edit a recipe because you
+-- started using less oil and every dinner you ate last year would silently
+-- restate itself. `food_id` still links to the catalogue where the name matches
+-- so a food's history can be followed; it is nullable because two years of
+-- diary entries are text and some of them name things no longer in the list.
+--
+-- `quantity` and `units` are what was eaten - 50 grams, 2 Portion - against the
+-- food's own portion size. Both nullable: the historic entries record a name
+-- like "All Real bar - 1 Bar" and nothing separable.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS food_entries (
+    id       INTEGER PRIMARY KEY,
+    day      TEXT    NOT NULL REFERENCES food_days(day) ON DELETE CASCADE,
+    meal     TEXT    NOT NULL,
+    position INTEGER NOT NULL CHECK (position > 0),
+    food_id  INTEGER REFERENCES foods(id),
+    name     TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    quantity REAL    CHECK (quantity IS NULL OR quantity > 0),
+    units    TEXT,
+    calories REAL    NOT NULL CHECK (calories >= 0),
+    carbs    REAL    NOT NULL CHECK (carbs   >= 0),
+    fat      REAL    NOT NULL CHECK (fat     >= 0),
+    protein  REAL    NOT NULL CHECK (protein >= 0),
+    source   TEXT    NOT NULL DEFAULT 'manual',   -- 'manual', 'xlsx', 'csv'
+    UNIQUE (day, meal, position)
+);
+
+CREATE INDEX IF NOT EXISTS ix_entries_day  ON food_entries (day, meal, position);
+CREATE INDEX IF NOT EXISTS ix_entries_food ON food_entries (food_id);
+
+-- ---------------------------------------------------------------------------
+-- Every day, with its macros added up and the target that applied to it.
+--
+-- The target is resolved per day rather than joined once: it is the latest
+-- version of the named profile that had started by then, so a day keeps being
+-- measured against what was true at the time however often the numbers change
+-- afterwards.
+--
+-- Two target columns, because they answer different questions and a page that
+-- confuses them tells a lie. `target_name` is what the day is *measured*
+-- against and is almost never NULL; `chosen_target` is what the day itself
+-- asked for, and is NULL for every one of the 290 imported days - they were
+-- recorded before profiles existed and picked nothing. Reading the first as the
+-- second puts "this day names its own target" under every day in the history.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_food_days;
+CREATE VIEW v_food_days AS
+SELECT
+    d.day,
+    d.note,
+    COALESCE(d.target_name, t.name)                       AS target_name,
+    d.target_name                                         AS chosen_target,
+    (SELECT COUNT(*) FROM food_entries e WHERE e.day = d.day) AS entries,
+    ROUND(COALESCE((SELECT SUM(calories) FROM food_entries e
+                     WHERE e.day = d.day), 0), 2)         AS calories,
+    ROUND(COALESCE((SELECT SUM(carbs) FROM food_entries e
+                     WHERE e.day = d.day), 0), 2)         AS carbs,
+    ROUND(COALESCE((SELECT SUM(fat) FROM food_entries e
+                     WHERE e.day = d.day), 0), 2)         AS fat,
+    ROUND(COALESCE((SELECT SUM(protein) FROM food_entries e
+                     WHERE e.day = d.day), 0), 2)         AS protein,
+    t.calories                                            AS target_calories,
+    t.carbs                                               AS target_carbs,
+    t.fat                                                 AS target_fat,
+    t.protein                                             AS target_protein
+FROM food_days d
+LEFT JOIN macro_targets t
+       ON t.id = (SELECT id FROM macro_targets m
+                   WHERE m.starts_on <= d.day
+                     AND (d.target_name IS NULL OR m.name = d.target_name)
+                   ORDER BY m.starts_on DESC, m.id DESC LIMIT 1);
+
+-- ---------------------------------------------------------------------------
+-- Every entry, carrying the day and the catalogue row it came from.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_food_entries;
+CREATE VIEW v_food_entries AS
+SELECT
+    e.*,
+    f.list      AS food_list,
+    f.grouping  AS food_grouping,
+    f.name      AS catalogue_name,
+    f.retired   AS food_retired
+FROM food_entries e
+LEFT JOIN foods f ON f.id = e.food_id;

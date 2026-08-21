@@ -1,0 +1,41 @@
+{# The four macros as a row of metric tiles, optionally against a target.
+
+   One partial rather than four copies of the same markup, because the day, the
+   week and the calculator all answer the same question and should not answer it
+   in three different layouts. #}
+{% macro tiles(totals, target=none, pct=none, remaining=none) %}
+<div class="metrics">
+  {% for key in macro_keys %}
+  <div class="metric">
+    <span class="label">{{ macro_labels[key] }}</span>
+    <span class="value">{{ totals[key] | macro(key) }}</span>
+    <span class="unit">{{ macro_units[key] }}{% if target and target[key] %}
+      of {{ target[key] | macro(key) }}{% endif %}</span>
+    {% if pct and pct[key] is not none %}
+    {# A bar rather than a number, because "how much of it is gone" is the
+       question and a phone reads a length faster than a percentage. Over
+       target is drawn full and coloured rather than overflowing. #}
+    <span class="bar {{ 'over' if pct[key] > 1 }}">
+      <span style="width: {{ [pct[key] * 100, 100] | min | round | int }}%"></span>
+    </span>
+    {# "146 over" rather than "-146 left", which is a sentence nobody says. The
+       sign is already carried by the word, so the number is shown unsigned. #}
+    <span class="small muted">
+      {{- (pct[key] * 100) | round | int }}%
+      {%- if remaining %} ·
+      {%- if remaining[key] < 0 %} {{ (0 - remaining[key]) | macro(key) }} over
+      {%- else %} {{ remaining[key] | macro(key) }} left{% endif %}{% endif %}</span>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# The same four numbers as table cells, for a row in a list of days. #}
+{% macro cells(row) %}
+{% for key in macro_keys %}<td class="num">{{ row[key] | macro(key) }}</td>{% endfor %}
+{% endmacro %}
+
+{% macro headers(prefix='') %}
+{% for key in macro_keys %}<th class="num">{{ prefix }}{{ macro_labels[key] }}</th>{% endfor %}
+{% endmacro %}

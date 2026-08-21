@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{# `with context`: an imported macro cannot see the template context
+   without it, so macro_keys and macro_labels would be undefined inside
+   these and every macro column would render empty - silently. #}
+{% import "diet/_macros.html" as m with context %}
+{% block title %}{{ week.label }} · Diet{% endblock %}
+
+{% block content %}
+<h1>{{ week.label }}</h1>
+
+<form class="filters" method="get" action="{{ url_for('diet.week') }}">
+  <div class="field">
+    <label for="day">Week containing</label>
+    <input type="date" id="day" name="day" value="{{ anchor.isoformat() }}"
+           onchange="this.form.submit()">
+  </div>
+  <div class="field">
+    <label for="starts_on">Starting on</label>
+    {# Parameterised because a planning week is a habit rather than a fact. The
+       diary's history is Monday-based and its "w/c" labels say so, so Monday is
+       the default; this changes the look without changing the setting. #}
+    <select id="starts_on" name="starts_on" onchange="this.form.submit()">
+      {% for name in weekday_names %}
+      <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == starts_on }}>
+        {{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <p class="actions">
+    <a class="button small" href="{{ url_for('diet.week', day=previous.isoformat(),
+       starts_on=starts_on) }}">←</a>
+    <a class="button small" href="{{ url_for('diet.week', day=today.isoformat(),
+       starts_on=starts_on) }}">This week</a>
+    <a class="button small" href="{{ url_for('diet.week', day=next_week.isoformat(),
+       starts_on=starts_on) }}">→</a>
+    <noscript><button type="submit">Show</button></noscript>
+  </p>
+</form>
+
+<div class="metrics">
+  <div class="metric"><span class="label">Days planned</span>
+    <span class="value">{{ planned }}</span><span class="unit">of 7</span></div>
+  {% for key in macro_keys %}
+  <div class="metric"><span class="label">{{ macro_labels[key] }} / day</span>
+    <span class="value">{{ averages[key] | macro(key) }}</span>
+    <span class="unit">{{ macro_units[key] }}{% if target and target[key] %}
+      of {{ target[key] | macro(key) }}{% endif %}</span></div>
+  {% endfor %}
+</div>
+<p class="caption">Averaged over the {{ planned }} day{{ '' if planned == 1 else 's' }}
+  that have something against them — a blank Thursday is not a 0-calorie day, so
+  it is not averaged in as one.</p>
+
+{# Seven rows, not seven columns. A week of four macros is 28 numbers and a phone
+   is 375px wide; the day is the row because the day is what gets tapped. #}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Day</th>{{ m.headers() }}<th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in week.days %}
+      <tr class="{{ 'muted' if not row.planned }}{{ ' today' if row.date == today }}">
+        <td>
+          <a href="{{ url_for('diet.day', day=row.day) }}">{{ row.weekday[:3] }}
+            {{ row.date.strftime('%d/%m') }}</a>
+          {% if row.date == today %}<span class="set-number">today</span>{% endif %}
+        </td>
+        {% if row.planned %}{{ m.cells(row) }}{% else %}
+        {% for key in macro_keys %}<td class="num muted">—</td>{% endfor %}
+        {% endif %}
+        <td class="num small">
+          {% if row.planned %}{{ row.entries }} line{{ '' if row.entries == 1 else 's' }}
+          {% else %}<a href="{{ url_for('diet.day', day=row.day) }}">plan it</a>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {# The target is multiplied by the days that have something against them,
+       not by seven. Six days against a seven-day target reads as 1,500 calories
+       under when the truth is that Sunday has not been planned yet, and a
+       tracker that says you did better than you did is worse than no tracker. #}
+    <tfoot>
+      <tr><th>Week total</th>{{ m.cells(week.totals) }}<th></th></tr>
+      {% if target and planned %}
+      <tr><th>Target × {{ planned }}</th>
+        {% for key in macro_keys %}
+        <td class="num muted">{{ (target[key] * planned) | macro(key) }}</td>{% endfor %}
+        <th class="num small muted">{{ 'planned day' if planned == 1 else 'planned days' }}</th></tr>
+      <tr><th>Difference</th>
+        {% for key in macro_keys %}
+        <td class="num">{{ (week.totals[key] - target[key] * planned) | delta(key) }}</td>
+        {% endfor %}
+        <th></th></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+</div>
+
+{# The workbook's Planner in one button: set a day up properly, then paste it
+   across the rest of the week. #}
+<div class="card">
+  <h3>Plan the week from one day</h3>
+  <p class="small muted">Copies every line of one day into the other six.
+    Days that already have entries are left alone unless you say otherwise,
+    because the usual shape of this is planning forward from a Monday that has
+    already happened.</p>
+  <form method="post" action="{{ url_for('diet.fill_week') }}">
+    <input type="hidden" name="anchor" value="{{ week.start.isoformat() }}">
+    <input type="hidden" name="starts_on" value="{{ starts_on }}">
+    <div class="row three">
+      <div class="field">
+        <label for="source">Copy from</label>
+        <input type="date" id="source" name="source"
+               value="{{ week.start.isoformat() }}" required>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" name="overwrite" value="1">
+          Overwrite days that already have entries</label>
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Fill the week</button></p>
+  </form>
+</div>
+{% endblock %}

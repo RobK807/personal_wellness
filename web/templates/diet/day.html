@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{# `with context`: an imported macro cannot see the template context
+   without it, so macro_keys and macro_labels would be undefined inside
+   these and every macro column would render empty - silently. #}
+{% import "diet/_macros.html" as m with context %}
+{% import "diet/_foodpicker.html" as picker with context %}
+{% block title %}{{ day.strftime('%a %d/%m/%Y') }} · Diet{% endblock %}
+
+{% block content %}
+<h1>{{ weekday }} {{ day.strftime('%d/%m/%Y') }}</h1>
+
+{# A date box and two arrows. The workbook looked a day up by week and then by
+   day within it; with 48 of 137 possible weeks recorded, counting from the start
+   is not a way of finding anything, and the question is "the 12th" anyway. #}
+<form class="filters" method="get" action="{{ url_for('diet.day') }}">
+  <div class="field">
+    <label for="day">Date</label>
+    <input type="date" id="day" name="day" value="{{ day.isoformat() }}"
+           onchange="this.form.submit()">
+  </div>
+  <p class="actions">
+    <a class="button small" href="{{ url_for('diet.day', day=previous.isoformat()) }}">←</a>
+    <a class="button small" href="{{ url_for('diet.day', day=today.isoformat()) }}">Today</a>
+    <a class="button small" href="{{ url_for('diet.day', day=next_day.isoformat()) }}">→</a>
+    <a class="button small" href="{{ url_for('diet.week', day=day.isoformat()) }}">{{ week_label }}</a>
+    <noscript><button type="submit">Show</button></noscript>
+  </p>
+</form>
+
+{% if target %}
+{{ m.tiles(totals, target, pct, remaining) }}
+<p class="caption">Against <strong>{{ target.name }}</strong>, in force from
+  {{ target.starts_on }}{% if row and row.chosen_target %} — chosen by this day
+  rather than inherited{% endif %}.</p>
+{% else %}
+{{ m.tiles(totals) }}
+<p class="caption muted">No target profile covers this date —
+  <a href="{{ url_for('diet.targets') }}">set one</a>.</p>
+{% endif %}
+
+{% if sheet %}
+{# One card per meal, with its own subtotal. The workbook's DailyCheck laid the
+   day out this way and it is right: what gets asked at four o'clock is "what is
+   left", and that is a question about the meals still to come. #}
+{% for block in sheet %}
+<div class="card">
+  <h3>{{ block.meal }}
+    <span class="rung-km">{{ block.totals.calories | macro('calories') }} kcal</span></h3>
+  <table class="sets">
+    <thead>
+      <tr><th>Food</th>{{ m.headers() }}</tr>
+    </thead>
+    <tbody>
+      {% for entry in block.entries %}
+      <tr>
+        <td>{{ entry.name }}
+          {% if entry.quantity %}<span class="set-number">{{ entry | quantity }}</span>{% endif %}
+          {% if not entry.food_id %}<span class="small muted"> · free text</span>{% endif %}
+        </td>
+        {{ m.cells(entry) }}
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th>{{ block.entries | length }} line{{ '' if block.entries | length == 1 else 's' }}</th>
+        {{ m.cells(block.totals) }}</tr>
+    </tfoot>
+  </table>
+</div>
+{% endfor %}
+{% else %}
+<p class="muted">Nothing recorded on this day yet. Add lines below, or
+  copy another day into it.</p>
+{% endif %}
+
+{# The editor. Every existing line plus four blanks, saved in one go - see the
+   note on food_mutations.save_day about why a day is replaced rather than
+   diffed. Picking a food fills the macros from the catalogue; leaving the food
+   blank and typing a name and four numbers is how a meal out gets recorded. #}
+<h2>Edit the day</h2>
+<form method="post" action="{{ url_for('diet.save_day', day=day.isoformat()) }}">
+  {% set ns = namespace(index=0) %}
+  {% for entry in sheet | map(attribute='entries') | sum(start=[]) %}
+  {% set ns.index = ns.index + 1 %}
+  <div class="card entry-row">
+    <div class="row three">
+      <div class="field">
+        <label for="row{{ ns.index }}_meal">Meal</label>
+        <select id="row{{ ns.index }}_meal" name="row{{ ns.index }}_meal">
+          {% for meal in meals %}
+          <option value="{{ meal }}" {{ 'selected' if meal == entry.meal }}>{{ meal }}</option>
+          {% endfor %}
+          {% if entry.meal not in meals %}
+          <option value="{{ entry.meal }}" selected>{{ entry.meal }}</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_food_id">Food</label>
+        <select id="row{{ ns.index }}_food_id" name="row{{ ns.index }}_food_id"
+                data-macro-source>{{ picker.options(catalogue, entry.food_id) }}</select>
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_quantity">Quantity</label>
+        <input type="number" step="any" min="0" id="row{{ ns.index }}_quantity"
+               name="row{{ ns.index }}_quantity" value="{{ entry.quantity or '' }}">
+      </div>
+    </div>
+    <div class="row three">
+      <div class="field">
+        <label for="row{{ ns.index }}_name">Name</label>
+        <input type="text" id="row{{ ns.index }}_name" name="row{{ ns.index }}_name"
+               value="{{ entry.name }}">
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_units">Units</label>
+        <input type="text" id="row{{ ns.index }}_units" name="row{{ ns.index }}_units"
+               list="food-units" value="{{ entry.units or '' }}">
+      </div>
+    </div>
+    <div class="row four">
+      {% for key in macro_keys %}
+      <div class="field">
+        <label for="row{{ ns.index }}_{{ key }}">{{ macro_labels[key] }}</label>
+        <input type="number" step="any" min="0" id="row{{ ns.index }}_{{ key }}"
+               name="row{{ ns.index }}_{{ key }}" value="{{ entry[key] }}">
+      </div>
+      {% endfor %}
+    </div>
+    <p class="actions small">
+      <label><input type="checkbox" name="row{{ ns.index }}_delete" value="1">
+        Remove this line</label>
+    </p>
+  </div>
+  {% endfor %}
+
+  {% for _ in blanks %}
+  {% set ns.index = ns.index + 1 %}
+  <div class="card entry-row blank">
+    <div class="row three">
+      <div class="field">
+        <label for="row{{ ns.index }}_meal">Meal</label>
+        <select id="row{{ ns.index }}_meal" name="row{{ ns.index }}_meal">
+          {% for meal in meals %}<option value="{{ meal }}">{{ meal }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_food_id">Food</label>
+        <select id="row{{ ns.index }}_food_id" name="row{{ ns.index }}_food_id"
+                data-macro-source>{{ picker.options(catalogue) }}</select>
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_quantity">Quantity</label>
+        <input type="number" step="any" min="0" id="row{{ ns.index }}_quantity"
+               name="row{{ ns.index }}_quantity">
+      </div>
+    </div>
+    <div class="row three">
+      <div class="field">
+        <label for="row{{ ns.index }}_name">Name</label>
+        <input type="text" id="row{{ ns.index }}_name" name="row{{ ns.index }}_name"
+               placeholder="only needed for a free-text line">
+      </div>
+      <div class="field">
+        <label for="row{{ ns.index }}_units">Units</label>
+        <input type="text" id="row{{ ns.index }}_units" name="row{{ ns.index }}_units"
+               list="food-units">
+      </div>
+    </div>
+    <div class="row four">
+      {% for key in macro_keys %}
+      <div class="field">
+        <label for="row{{ ns.index }}_{{ key }}">{{ macro_labels[key] }}</label>
+        <input type="number" step="any" min="0" id="row{{ ns.index }}_{{ key }}"
+               name="row{{ ns.index }}_{{ key }}">
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="card">
+    <div class="row three">
+      <div class="field">
+        <label for="target_name">Target profile</label>
+        <select id="target_name" name="target_name">
+          <option value="">— whichever is in force —</option>
+          {% for name in target_names %}
+          <option value="{{ name }}" {{ 'selected' if row and name == row.chosen_target }}>
+            {{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="note">Note</label>
+        <input type="text" id="note" name="note" value="{{ (row.note if row else '') or '' }}"
+               placeholder="optional">
+      </div>
+    </div>
+    <p class="actions"><button class="primary" type="submit">Save the day</button></p>
+  </div>
+</form>
+
+<datalist id="food-units">
+  {% for unit in units %}<option value="{{ unit }}">{% endfor %}
+</datalist>
+
+<div class="card">
+  <h3>Copy another day into this one</h3>
+  <p class="small muted">Replaces everything on {{ day.strftime('%d/%m/%Y') }}.
+    This is how the workbook's Planner worked: set one day up properly, then
+    paste it.</p>
+  <form method="post" action="{{ url_for('diet.copy_day') }}">
+    <input type="hidden" name="target" value="{{ day.isoformat() }}">
+    <div class="row three">
+      <div class="field">
+        <label for="source">Copy from</label>
+        <input type="date" id="source" name="source" value="{{ previous.isoformat() }}"
+               required>
+      </div>
+    </div>
+    <p class="actions"><button type="submit">Copy it in</button></p>
+  </form>
+</div>
+
+{% if row %}
+<form method="post" action="{{ url_for('diet.delete_day', day=day.isoformat()) }}"
+      onsubmit="return confirm('Clear every line on {{ day.strftime('%d/%m/%Y') }}?')">
+  <p class="actions"><button class="small" type="submit">Clear this day</button></p>
+</form>
+{% endif %}
+
+{# Choosing a food fills the four macros from the catalogue, scaled to the
+   quantity. Progressive enhancement only: without it the numbers are typed, and
+   the server does the same arithmetic on save either way - core/food.eaten() is
+   what actually decides what gets stored. #}
+{{ picker.catalogue_json(lookup) }}
+<script>
+(function () {
+  var KEYS = {{ macro_keys | tojson }};
+  var node = document.getElementById('food-catalogue');
+  var FOODS = node ? JSON.parse(node.textContent) : {};
+
+  function fill(select) {
+    var row = select.closest('.entry-row');
+    var item = row && FOODS[select.value];
+    if (!item) return;
+    var portion = parseFloat(item.portion) || 1;
+    var qtyBox = row.querySelector('[name$="_quantity"]');
+    var quantity = parseFloat(qtyBox && qtyBox.value);
+    if (!quantity) {
+      quantity = portion;
+      if (qtyBox) qtyBox.value = portion;
+    }
+    var factor = quantity / portion;
+    KEYS.forEach(function (key) {
+      var box = row.querySelector('[name$="_' + key + '"]');
+      if (box) box.value = Math.round((item[key] || 0) * factor * 100) / 100;
+    });
+    var units = row.querySelector('[name$="_units"]');
+    if (units) units.value = item.units || '';
+    var name = row.querySelector('[name$="_name"]');
+    if (name) name.value = item.name || '';
+  }
+
+  document.querySelectorAll('[data-macro-source]').forEach(function (select) {
+    select.addEventListener('change', function () { fill(select); });
+    var row = select.closest('.entry-row');
+    var qty = row && row.querySelector('[name$="_quantity"]');
+    // Changing the quantity re-scales, but only for a row that names a food -
+    // a free-text line's macros are the ones that were typed, and multiplying
+    // them by a quantity somebody entered afterwards would be a guess.
+    if (qty) qty.addEventListener('change', function () { fill(select); });
+  });
+})();
+</script>
+{% endblock %}

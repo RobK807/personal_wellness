@@ -107,6 +107,177 @@ def seed_runs() -> None:
             splits)
 
 
+def food_section(client) -> None:
+    """The food section: build a day, read it back, plan a week from it.
+
+    Deliberately not the food workbook - food_test.py reconciles against that.
+    This is the routes and the two form handlers, on a fixture whose answers can
+    be worked out in your head: a food of 100 kcal per 100 g, so a quantity is
+    its own number of calories.
+    """
+    from core import food_mutations as fm, food_queries as fq
+
+    print("\nfood: the empty state")
+    for path in ["/diet/", "/diet/week", "/diet/calculator", "/diet/foods",
+                 "/diet/targets", "/diet/analysis"]:
+        check(f"GET {path}", client.get(path).status_code, 200)
+    check("a target is seeded", fq.total_targets() >= 1, True)
+
+    print("\nfood: the catalogue")
+    client.post("/diet/foods", data={
+        "name": "Test oats", "list": "Items", "grouping": "Meal component",
+        "portion": "100", "units": "grams", "calories": "100", "carbs": "60",
+        "fat": "8", "protein": "12"}, follow_redirects=True)
+    oats = fq.food_by_name("Test oats")
+    check("saved", oats is not None, True)
+    check("refuses the same name in the same list",
+          "flash flash-error" in client.post("/diet/foods", data={
+              "name": "Test oats", "list": "Items", "portion": "1",
+              "calories": "1", "carbs": "0", "fat": "0", "protein": "0"},
+              follow_redirects=True).get_data(as_text=True), True)
+    # The workbook has "Mashed potato" as both an Item and a Recipe, so the
+    # same name in a different list has to be allowed.
+    client.post("/diet/foods", data={
+        "name": "Test oats", "list": "Recipes", "portion": "1",
+        "units": "Portion", "calories": "250", "carbs": "30", "fat": "5",
+        "protein": "10"}, follow_redirects=True)
+    check("the same name in another list is fine",
+          len(fq.foods(search="Test oats", include_retired=True)), 2)
+
+    print("\nfood: one day")
+    day = TODAY.isoformat()
+    resp = client.post(f"/diet/day/save?day={day}", data={
+        # 250 g of a per-100 g food: 250 kcal, and every other macro x2.5.
+        "row1_meal": "Breakfast", "row1_food_id": str(oats["id"]),
+        "row1_quantity": "250", "row1_name": "Test oats", "row1_units": "grams",
+        "row1_calories": "0", "row1_carbs": "0", "row1_fat": "0",
+        "row1_protein": "0",
+        # A free-text line: its macros are taken as given, which is the only
+        # way two years of imported diary can be recorded at all.
+        "row2_meal": "Dinner", "row2_food_id": "", "row2_name": "Dinner out",
+        "row2_quantity": "1", "row2_units": "Portion",
+        "row2_calories": "800", "row2_carbs": "70", "row2_fat": "30",
+        "row2_protein": "40",
+        # Wholly blank: must be skipped rather than stored as a zero line.
+        "row3_meal": "Snacks", "row3_food_id": "", "row3_name": "",
+        "row3_calories": "", "row3_carbs": "", "row3_fat": "",
+        "row3_protein": "",
+    }, follow_redirects=True)
+    check("status", resp.status_code, 200)
+    row = fq.day(day)
+    check("the blank row was skipped", row["entries"], 2)
+    check("the catalogue line was scaled by its portion", row["calories"],
+          250.0 + 800.0)
+    check("and so were its other macros", row["carbs"], 150.0 + 70.0)
+    entries = fq.entries(day)
+    check("the catalogue line is linked",
+          entries[0]["food_id"], oats["id"])
+    check("the free-text line is not",
+          [e["food_id"] for e in entries if e["name"] == "Dinner out"], [None])
+
+    print("\nfood: a day is replaced, not added to")
+    client.post(f"/diet/day/save?day={day}", data={
+        "row1_meal": "Dinner", "row1_food_id": "", "row1_name": "Dinner out",
+        "row1_quantity": "1", "row1_calories": "800", "row1_carbs": "70",
+        "row1_fat": "30", "row1_protein": "40"}, follow_redirects=True)
+    check("saving again replaces the day", fq.day(day)["entries"], 1)
+
+    print("\nfood: bad input is refused, and nothing is stored")
+    future = (TODAY + dt.timedelta(days=40)).isoformat()
+    body = client.post(f"/diet/day/save?day={future}", data={
+        "row1_meal": "Lunch", "row1_food_id": "", "row1_name": "Nonsense",
+        "row1_calories": "99999", "row1_carbs": "0", "row1_fat": "0",
+        "row1_protein": "0"}, follow_redirects=True).get_data(as_text=True)
+    check("the error is shown", "flash flash-error" in body, True)
+    check("and the day was not created", fq.day(future) is None, True)
+
+    print("\nfood: planning a week from one day")
+    monday = TODAY - dt.timedelta(days=TODAY.weekday())
+    client.post("/diet/day/copy",
+                data={"source": day, "target": monday.isoformat()},
+                follow_redirects=True)
+    client.post("/diet/week/fill", data={
+        "source": monday.isoformat(), "anchor": monday.isoformat(),
+        "starts_on": "0"}, follow_redirects=True)
+    week = fq.week(monday, 0)
+    check("all seven days are planned",
+          sum(1 for r in week["days"] if r["planned"]), 7)
+    check("each carries the source day's calories",
+          {r["calories"] for r in week["days"]}, {800.0})
+
+    # Filling again must not double anything: a day that already has entries is
+    # left alone, which is what makes the button safe to press twice.
+    client.post("/diet/week/fill", data={
+        "source": monday.isoformat(), "anchor": monday.isoformat(),
+        "starts_on": "0"}, follow_redirects=True)
+    check("filling twice changes nothing",
+          {r["calories"] for r in fq.week(monday, 0)["days"]}, {800.0})
+
+    print("\nfood: a week can start on any day")
+    thursday = fq.week(monday, 3)
+    check("a Thursday week starts on a Thursday",
+          thursday["start"].weekday(), 3)
+    check("and still holds seven days", len(thursday["days"]), 7)
+
+    print("\nfood: the macro calculator")
+    body = client.post("/diet/calculator", data={
+        "c1_food_id": str(oats["id"]), "c1_quantity": "150",
+        "c2_name": "Off a packet", "c2_quantity": "200", "c2_calories": "2",
+        "c2_carbs": "1", "c2_fat": "0", "c2_protein": "0.5",
+        "scale": "0.5"}).get_data(as_text=True)
+    # 150 g of oats is 150 kcal; 200 units at 2 kcal each is 400; half of 550
+    # is 275. Worked out by hand because that is the point of the fixture.
+    check("the components are shown", "Off a packet" in body, True)
+    check("subtotal, then scaled", "550" in body and "275" in body, True)
+
+    print("\nfood: targets are dated, not overwritten")
+    client.post("/diet/targets", data={
+        "name": "Test cut", "starts_on": TODAY.isoformat(), "calories": "1700",
+        "carbs": "150", "fat": "45", "protein": "180"}, follow_redirects=True)
+    check("in force today", fq.target_for(TODAY, "Test cut")["calories"], 1700.0)
+    client.post("/diet/targets", data={
+        "name": "Test cut", "starts_on": (TODAY + dt.timedelta(days=7)).isoformat(),
+        "calories": "1600", "carbs": "140", "fat": "40", "protein": "185"},
+        follow_redirects=True)
+    check("today still reads the old version",
+          fq.target_for(TODAY, "Test cut")["calories"], 1700.0)
+    check("next week reads the new one",
+          fq.target_for(TODAY + dt.timedelta(days=7), "Test cut")["calories"],
+          1600.0)
+
+    print("\nfood: retiring keeps the history, deleting is refused")
+    # On a day of its own, because the day above was saved a second time and a
+    # day is replaced wholesale - so by now nothing uses the oats at all, and
+    # deleting it would rightly be allowed.
+    held = (TODAY - dt.timedelta(days=30)).isoformat()
+    client.post(f"/diet/day/save?day={held}", data={
+        "row1_meal": "Breakfast", "row1_food_id": str(oats["id"]),
+        "row1_quantity": "100", "row1_name": "Test oats", "row1_units": "grams",
+        "row1_calories": "0", "row1_carbs": "0", "row1_fat": "0",
+        "row1_protein": "0"}, follow_redirects=True)
+    check("a per-100 g food at 100 g is its own calories",
+          fq.day(held)["calories"], 100.0)
+
+    client.post("/diet/foods", data={"action": "retire",
+                                     "food_id": str(oats["id"])},
+                follow_redirects=True)
+    check("out of the dropdowns", fq.food_row(oats["id"])["retired"], 1)
+    check("but still on its diary lines",
+          fq.food_usage().get(oats["id"], 0) >= 1, True)
+    body = client.post("/diet/foods", data={"action": "delete",
+                                            "food_id": str(oats["id"])},
+                       follow_redirects=True).get_data(as_text=True)
+    check("deleting a food in use is refused", "flash flash-error" in body, True)
+    check("and it is still there", fq.food_row(oats["id"]) is not None, True)
+
+    print("\nfood: the day page reads back")
+    body = client.get(f"/diet/?day={monday.isoformat()}").get_data(as_text=True)
+    check("names the food", "Dinner out" in body, True)
+    check("shows the day's total", "800" in body, True)
+    check("and the catalogue is sent once, not per dropdown",
+          body.count('id="food-catalogue"'), 1)
+
+
 def workout_tracker(client) -> None:
     """The workout section: build a session, read it back, tick it off.
 
@@ -948,12 +1119,7 @@ def main() -> int:
 
     workout_tracker(client)
 
-    print("\nthe placeholder sections render")
-    for path in ["/diet/", "/diet/analysis"]:
-        response = client.get(path)
-        check(f"GET {path}", response.status_code, 200)
-        check(f"{path} says it is not built",
-              "Not built yet" in response.get_data(as_text=True), True)
+    food_section(client)
 
     # --- auth gate ------------------------------------------------------------
     print("\npassword gate")

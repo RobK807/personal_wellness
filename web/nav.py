@@ -40,7 +40,13 @@ PAGES = {
         ("workouts.exercises",   "Moves",    "Exercises"),
     ],
     "diet": [
-        ("diet.log",             "Log",      "Log"),
+        # Day first, for the same reason Session leads the workouts: it is the
+        # page that gets opened to answer a question, and the rest is setup.
+        ("diet.day",             "Day",      "Day"),
+        ("diet.week",            "Week",     "Week"),
+        ("diet.calculator",      "Calc",     "Calculator"),
+        ("diet.foods",           "Foods",    "Catalogue"),
+        ("diet.targets",         "Targets",  "Targets"),
         ("diet.analysis",        "Analysis", "Analysis"),
     ],
 }

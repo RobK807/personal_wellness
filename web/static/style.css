@@ -396,3 +396,32 @@ tr.flagged td { color: var(--muted); }
 .placeholder .lede { font-size: 1.02rem; }
 .placeholder ol { padding-left: 1.2rem; color: var(--muted); font-size: .92rem; }
 .placeholder ol li { margin-bottom: .5rem; }
+
+/* --------------------------------------------------------------------------
+   Food planner and diary.
+   -------------------------------------------------------------------------- */
+
+/* Four macros side by side, which is one column more than anything else in the
+   app needs. Two-up on a phone rather than four, because "1,234" at a quarter of
+   375px wraps. */
+@media (min-width: 480px) { .row.four { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 900px) { .row.four { grid-template-columns: repeat(4, 1fr); } }
+
+/* How much of a target is gone. A length rather than a number: the question is
+   "is there room left", and a bar answers it without being read. Over target is
+   drawn full and coloured rather than overflowing its box. */
+.metric .bar { display: block; height: 4px; margin: .35rem 0 .2rem;
+               background: var(--grid); border-radius: 999px; overflow: hidden; }
+.metric .bar > span { display: block; height: 100%; background: var(--accent); }
+.metric .bar.over > span { background: var(--warn); }
+
+/* One diary line in the day editor. Tinted when it is one of the blank rows at
+   the bottom, so the difference between "recorded" and "somewhere to type" is
+   visible without reading any of it. */
+.entry-row { margin-bottom: .6rem; }
+.entry-row.blank { background: transparent; border-style: dashed; }
+.entry-row .field { margin-bottom: .5rem; }
+.entry-row .actions { margin-bottom: 0; }
+
+tr.today td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+tr.today td:first-child { font-weight: 600; }

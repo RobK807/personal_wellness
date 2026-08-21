@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{# `with context`: an imported macro cannot see the template context
+   without it, so macro_keys and macro_labels would be undefined inside
+   these and every macro column would render empty - silently. #}
+{% import "diet/_macros.html" as m with context %}
+{% block title %}Targets · Diet{% endblock %}
+
+{% block content %}
+<h1>Targets</h1>
+<p class="caption">
+  What a day is measured against. Named, so a training day and a rest day can
+  want different things; and <strong>dated</strong>, so raising today's protein
+  target does not restate a day from 2024 as a failure against a number that did
+  not exist then. Each save adds a version from a date rather than overwriting
+  what came before.
+</p>
+
+{% if in_force %}
+<h2>In force today</h2>
+{{ m.tiles(in_force) }}
+<p class="caption"><strong>{{ in_force.name }}</strong>, from
+  {{ in_force.starts_on }}{{ ' — ' ~ in_force.note if in_force.note }}</p>
+{% endif %}
+
+<div class="card">
+  <h3>Set a target</h3>
+  <form method="post" action="{{ url_for('diet.targets') }}">
+    <div class="row three">
+      <div class="field">
+        <label for="name">Profile</label>
+        <input type="text" id="name" name="name" list="target-names" required
+               value="{{ default_name }}" placeholder="Base">
+      </div>
+      <div class="field">
+        <label for="starts_on">From</label>
+        <input type="date" id="starts_on" name="starts_on" value="{{ today.isoformat() }}">
+      </div>
+      <div class="field">
+        <label for="note">Note</label>
+        <input type="text" id="note" name="note" placeholder="optional">
+      </div>
+    </div>
+    <div class="row four">
+      {% for key in macro_keys %}
+      <div class="field">
+        <label for="new_{{ key }}">{{ macro_labels[key] }}</label>
+        <input type="number" step="any" min="0" id="new_{{ key }}" name="{{ key }}"
+               value="{{ in_force[key] if in_force else 0 }}">
+      </div>
+      {% endfor %}
+    </div>
+    <p class="actions"><button class="primary" type="submit">Save</button></p>
+    <p class="small muted">Re-using a name adds a version to it. A day picks the
+      newest version dated on or before that day — which is why the seeded one
+      starts in 2000, so the imported diary has something to be compared against.</p>
+  </form>
+</div>
+
+<h2>Every version</h2>
+<div class="moves">
+  {% for row in targets %}
+  <details class="panel move">
+    <summary>
+      <span class="move-name">{{ row.name }}</span>
+      <span class="move-tags">
+        <span class="tag">from {{ row.starts_on }}</span>
+        <span class="tag quiet">{{ row.calories | macro('calories') }} kcal</span>
+        {% for key in macro_keys if key != 'calories' %}
+        <span class="tag quiet">{{ macro_labels[key] }}
+          {{ row[key] | macro(key) }}{{ macro_units[key] }}</span>
+        {% endfor %}
+        {%- if in_force and row.id == in_force.id %}<span class="tag">in force</span>{% endif %}
+      </span>
+    </summary>
+    <div>
+      <form method="post" action="{{ url_for('diet.targets') }}">
+        <input type="hidden" name="target_id" value="{{ row.id }}">
+        <div class="row three">
+          <div class="field">
+            <label for="name_{{ row.id }}">Profile</label>
+            <input type="text" id="name_{{ row.id }}" name="name" value="{{ row.name }}"
+                   required>
+          </div>
+          <div class="field">
+            <label for="starts_{{ row.id }}">From</label>
+            <input type="date" id="starts_{{ row.id }}" name="starts_on"
+                   value="{{ row.starts_on }}">
+          </div>
+          <div class="field">
+            <label for="note_{{ row.id }}">Note</label>
+            <input type="text" id="note_{{ row.id }}" name="note" value="{{ row.note or '' }}">
+          </div>
+        </div>
+        <div class="row four">
+          {% for key in macro_keys %}
+          <div class="field">
+            <label for="{{ key }}_{{ row.id }}">{{ macro_labels[key] }}</label>
+            <input type="number" step="any" min="0" id="{{ key }}_{{ row.id }}"
+                   name="{{ key }}" value="{{ row[key] }}">
+          </div>
+          {% endfor %}
+        </div>
+        <p class="actions">
+          <button class="primary" type="submit" name="action" value="save">Save</button>
+          <button class="danger" type="submit" name="action" value="delete"
+                  onclick="return confirm('Delete the {{ row.name }} version from {{ row.starts_on }}?')">
+            Delete this version</button>
+        </p>
+      </form>
+    </div>
+  </details>
+  {% else %}
+  <p class="muted">No targets yet.</p>
+  {% endfor %}
+</div>
+
+<datalist id="target-names">
+  {% for name in names %}<option value="{{ name }}">{% endfor %}
+</datalist>
+{% endblock %}

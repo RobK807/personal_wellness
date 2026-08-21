@@ -22,7 +22,7 @@ from flask import (Flask, flash, redirect, render_template, request, session,
                    url_for)
 
 import config
-from core import db, metrics, queries, runs, workouts
+from core import db, food, metrics, queries, runs, workouts
 from web import nav
 
 
@@ -160,6 +160,30 @@ def _register_filters(app: Flask) -> None:
     @app.template_filter("pct")
     def _pct(value) -> str:
         return f"{float(value) * 100:g}%" if value else ""
+
+    # Food. `macro` takes a key for the same reason `metric` does: calories are
+    # shown whole and grams to a decimal place, and the template should not have
+    # to remember which is which.
+
+    @app.template_filter("macro")
+    def _macro(value, key: str = "calories") -> str:
+        return food.fmt_macro(key, value)
+
+    @app.template_filter("macro_unit")
+    def _macro_unit(value, key: str = "calories") -> str:
+        return food.fmt_macro(key, value, with_unit=True)
+
+    @app.template_filter("delta")
+    def _delta(value, key: str = "calories") -> str:
+        return food.fmt_delta(key, value)
+
+    @app.template_filter("quantity")
+    def _quantity(row) -> str:
+        return food.fmt_quantity(row.get("quantity"), row.get("units"))
+
+    @app.template_filter("weekstart")
+    def _week_start(value, starts_on=None) -> str:
+        return food.week_label(value, starts_on)
 
 
 def _register_context(app: Flask) -> None:

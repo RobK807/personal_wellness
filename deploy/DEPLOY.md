@@ -98,14 +98,24 @@ needs far more memory than the NAS has free.
 ```bash
 python -m core.excel_import --rebuild     # the weigh-in history
 python -m core.strava_import --rebuild    # the runs
+python -m core.gym_import                 # the gym programme
+python -m core.food_import --catalogue    # the food lists
+python -m core.food_import --load "data/imports/food_diary_cleaned.csv" --replace
 python reconcile_test.py
 python run_test.py
+python workout_test.py
+python food_test.py
 python deploy/push_to_nas.py --with-db
 ```
 
-Both importers write into the same `data/wellness.db`, and both are safe to
-re-run: the weigh-in one keys on date and slot, the run one on date, distance
-and elapsed time.
+Every importer writes into the same `data/wellness.db`, and all of them are safe
+to re-run: the weigh-in one keys on date and slot, the run one on date, distance
+and elapsed time, the food catalogue on list and name.
+
+The food diary is the one that does not come straight out of its workbook. Its
+lines are rendered strings rather than a food and a quantity, so they were
+exported to a CSV, corrected by hand and loaded back — see the README. The
+corrected file is what `--load` reads, and it lives in `data/imports/`.
 
 `push_to_nas.py` writes Unix line endings (DSM's `/bin/sh` fails on CRLF with
 misleading `not found` errors), skips caches and anything the NAS owns, leaves
@@ -190,6 +200,52 @@ comparison fails it says so and names the backup to restore.
 Ids are not carried across: movements are matched **by name**, and anything the
 NAS catalogue has not got is added to it. That is what makes the script safe to
 run against a NAS whose catalogue has been edited since, and safe to run twice.
+
+Pointing `--target` at a local copy is a rehearsal, and needs nothing stopped.
+
+### Sending food across
+
+The same problem as a workout plan, and the same answer. `food_import` reads a
+workbook, the workbooks are never pushed to the NAS, and openpyxl opening one
+needs more memory than the DS218play has free.
+
+Pushing the whole database instead is not an option once the dashboard is in
+use — the NAS copy is the live one and holds weigh-ins and runs entered from a
+phone that this PC has never seen.
+
+```bash
+python deploy/send_food.py                  # what is here, what is there
+python deploy/send_food.py --all            # the catalogue and the diary
+python deploy/send_food.py --catalogue      # just the foods and the targets
+python deploy/send_food.py --all --dry-run
+```
+
+**Stop the dashboard first** — the script refuses while port 8503 answers,
+because this writes SQLite over SMB and that is only safe with exactly one
+writer:
+
+```bash
+sh /volume1/dashboards/personal_wellness/deploy/stop.sh
+python deploy/send_food.py --all
+sh /volume1/dashboards/personal_wellness/deploy/run.sh
+```
+
+It touches **only the four food tables**. The weigh-ins, the runs and every
+workout table are never read from the source and never written. It backs the
+target up first and reads every day's four macro totals back afterwards to prove
+the transfer arrived intact.
+
+Ids are not carried across: foods are matched on **(list, name)** — the pair the
+table is unique on, because the workbook has "Mashed potato" as both an Item and
+a Recipe — and each diary line is re-linked to whatever the target's id turns out
+to be. Anything the target has not got is added.
+
+Two rules about overwriting, and they differ on purpose. A **food or target**
+already on the NAS is left alone unless `--overwrite-foods` is given: the NAS
+copy is the live one, and a portion corrected on a phone should not be undone by
+a push from a stale desktop. A **day** is replaced, because a day is saved
+wholesale everywhere else in this section and half a day merged from two sources
+is not a day anybody ate — `--skip-existing-days` keeps the target's version.
 
 Pointing `--target` at a local copy is a rehearsal, and needs nothing stopped.
 

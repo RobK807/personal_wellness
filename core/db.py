@@ -73,6 +73,7 @@ def init_db(db_path: Path | None = None) -> None:
         _convert_interval_splits(conn)
         _seed_run_options(conn)
         _seed_exercises(conn)
+        _seed_targets(conn)
     finally:
         conn.close()
 
@@ -216,6 +217,28 @@ def _seed_exercises(conn: sqlite3.Connection) -> list:
              1 if bodyweight else 0, position))
         added.append(name)
     log(conn, "migrate", "exercises", None, f"seeded {len(added)} exercises")
+    return added
+
+
+def _seed_targets(conn: sqlite3.Connection) -> list:
+    """Fill macro_targets on first start, from config.FOOD_TARGET_SEED.
+
+    Same rule as the other seeds: only ever against an empty table, so a target
+    edited in the app is not undone by the next restart. Dated from 2000 so that
+    every imported day - the diary starts in 2024 - has something in force to be
+    compared against.
+    """
+    if conn.execute("SELECT COUNT(*) FROM macro_targets").fetchone()[0]:
+        return []
+    added = []
+    for name, calories, carbs, fat, protein in config.FOOD_TARGET_SEED:
+        conn.execute(
+            "INSERT INTO macro_targets (name, starts_on, calories, carbs, fat, "
+            "protein, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, "2000-01-01", calories, carbs, fat, protein,
+             "Seeded from the workbook"))
+        added.append(name)
+    log(conn, "migrate", "macro_targets", None, f"seeded {', '.join(added)}")
     return added
 
 

@@ -4,7 +4,8 @@ Four trackers behind one sidebar, on one database, with two front-ends over the
 top. The **weigh-in tracker** is the standalone app of the same name, moved in
 whole; the **run tracker** is built from seven years of runs scraped off
 Strava; the **workout tracker** is built from the gym programme workbook; the
-**diet tracker** is a placeholder with nothing behind it yet, and says so.
+**diet tracker** is built from the food planner workbook and two and a half
+years of diary.
 
 Built the same way as the CD dashboard next door: one shared `core` package, a
 **Flask** front-end light enough to run on the NAS, and a **Streamlit** one for
@@ -15,6 +16,7 @@ pip install -r requirements.txt
 python -m core.excel_import --rebuild     # the weigh-in history, once
 python -m core.strava_import --rebuild    # the runs, once
 python -m core.gym_import                 # the gym programme, once
+python -m core.food_import --catalogue    # the food lists, once
 python serve.py                           # Flask, http://localhost:8503
 streamlit run app.py                      # Streamlit, same data
 ```
@@ -36,7 +38,7 @@ navigations that can drift apart.
 | ⚖️ **Weigh-in tracker** | Six years of weigh-ins, unchanged. [What it does](#the-weigh-in-tracker) |
 | 🏃 **Run tracker** | 229 runs, 1,542 best efforts. [What it does](#the-run-tracker) |
 | 🏋️ **Workout plan** | 19 weeks, 38 sessions, 564 sets. [What it does](#the-workout-tracker) |
-| 🥗 **Diet tracker** | Placeholder. [Why there is no schema yet](#the-one-that-is-not-built) |
+| 🥗 **Diet tracker** | 2,065 diary lines over 290 days, 187 foods. [What it does](#the-diet-tracker) |
 
 ---
 
@@ -478,16 +480,144 @@ the import says either *every weight matches* or lists the ones that do not.
 
 ---
 
-## The one that is not built
+## The diet tracker
 
-There are no diet tables in `core/schema.sql`, deliberately. Guessing at a schema
-for a tracker that has not been designed is expensive to undo once there is data
-in it, and the run and workout trackers both show what designed looks like — a
-ladder of best efforts is a very particular shape, and so is a set, and both came
-from knowing what the sheet held.
+Built from `Food Planner v0.1.xlsx`: a food catalogue, two and a half years of
+diary, a weekly planner and a macro calculator. Sodium and sugar are **not**
+imported — the workbook has columns for them and no data in them, so there are
+four macros and only four: calories, carbs, fat and protein.
 
-The placeholder pages list what has to be decided first. The section already
-exists in `config.SECTIONS`, so both front-ends already have the sidebar entry.
+**Day** is the landing page and the workbook's DailyCheck sheet, with one change
+that was the point of rebuilding it: it is addressed **by date**, not by week and
+then day within it. The diary holds 48 of a possible 137 weeks, so counting from
+the start is not a way of finding anything, and "what did I eat on the 12th" is
+the question being asked anyway. The four totals, what is left of each and how
+far through the target that is all sit above the editor.
+
+**Week** is seven days starting on whichever day `config.WEEK_STARTS_ON` names.
+The workbook ran Monday to Sunday and every "W/C" header in its diary is a
+Monday, so that is the default — but which day a planning week turns over on is
+a habit rather than a fact, and the picker changes the view without changing the
+setting. *Fill the week* is the workbook's Planner in one button: set one day up
+properly, then paste it across the rest. Days that already have entries are left
+alone unless you say otherwise, which is what makes it safe to press twice.
+
+**Calculator** is the workbook's Calculator sheet. Components in — either a
+catalogue food and a quantity, or a name and four numbers off a packet — and the
+total comes out, times a scaling factor. The scale applies to the **total**
+rather than to any one row, because that is the question being asked: the pan of
+pancake mix makes rather more than the 200 g that gets eaten. The answer can be
+saved to the catalogue when it turns out to be a recipe rather than a one-off.
+
+### Portions are the only arithmetic that can silently be wrong
+
+A catalogue row records its macros *for* a portion — 266 kcal per 75 g of rice,
+not per gram — so eating 150 g is twice it and 37.5 g is half. That division is
+one function, `core.food.scale_macros()`, called from one place, and
+`food_test.py` checks it against the foods whose portions are not 1. The Flask
+day form previews the same arithmetic in JavaScript, and the server recomputes
+it on save either way, so a browser with no scripting gets the same answer more
+slowly rather than a different one.
+
+### Macros are stored, not looked up
+
+The opposite of the rule the run tracker follows for pace, and right here for a
+reason the imported history makes plain: **the diary records what was eaten, the
+catalogue records what a food is now, and the second changes.** Edit a recipe
+because you started using less oil and every dinner from last year would quietly
+restate itself. `food_id` still links a line to the catalogue where the name
+matches, so a food's history can be followed; it is nullable because a meal out
+is not in any list.
+
+### Targets are named and dated
+
+Named, so a training day and a rest day can want different things. Dated, so
+raising today's protein target does not restate a day from 2024 as a failure
+against a number that did not exist then — a day picks the newest version dated
+on or before it, which is why the seeded profile starts in 2000. `v_food_days`
+resolves that per day and exposes both `target_name` (what the day is measured
+against) and `chosen_target` (what the day itself asked for, which for all 290
+imported days is nothing).
+
+### The diary came back through a CSV
+
+The catalogue went straight in — 183 rows, all numeric, nothing to interpret.
+The diary did not. `Food_Diary` is 49 week blocks of seven columns, and every
+line of it is a *rendered string* — `"All Real bar - 1 Bar"` — rather than a food
+and a quantity: 287 distinct strings against 182 catalogue entries, the
+difference being spelling, portions written into names, and things eaten once.
+Guessing would have quietly rewritten two years of history, so it was exported
+to a CSV, corrected by hand and read back.
+
+```bash
+python -m core.food_import --catalogue        # the Food sheet -> foods
+python -m core.food_import --export           # the diary -> a CSV to correct
+python -m core.food_import --load FILE --replace
+```
+
+The export splits each string on the **last** `" - number units"` it finds, not
+the first, or `"Nature Valley - Salted Caramel Nut - 1 Bar"` becomes a food
+called *Nature Valley* eaten in units of *Salted Caramel Nut*. It writes the
+untouched original beside its guess so a wrong one is visible rather than baked
+in, and flags the rows worth a second look. The loader parses every row before
+writing any, and reports **all** the bad lines rather than the first — correcting
+a two-year diary is one pass through a spreadsheet, and being told about the
+problems one at a time turns that into twenty.
+
+It also accepts `dd/mm/yyyy`, because opening the export in Excel and saving it
+rewrites every date. Which way round `03/08/2026` reads is decided by the
+`weekday` column written beside it rather than by assuming a locale.
+
+### What the workbook turned out to contain
+
+`food_test.py` separates three things that a single comparison would hide:
+
+**The load is faithful.** All 290 days match the CSV exactly.
+
+**17 days were deliberately restated** by the corrections — dinners out
+re-estimated onto one standing figure, a few recipes refreshed against current
+macros, and a "Pizza Night" the workbook recorded as zero calories.
+
+**Six of the workbook's own `Consumed` cells contradict the entry rows directly
+above them** — a stale cached formula, off by as much as 910 kcal on 02/12/2024.
+The entries are the record and the total is a formula, so the entries win; the
+disagreement is pinned in the test rather than smoothed over.
+
+Every other day reproduces the sheet's own arithmetic to the penny.
+
+Two things in the history are worth knowing about and were left as they are.
+`W/C 27/07/2026` appears **twice**; the fuller block (54 entries) is kept and the
+import says so. And seventeen 2024 rice and pasta lines are recorded at a cooked
+rate while every other one in the diary is dry — the same `"85 grams"` means dry
+in fifteen rows and cooked in seventeen. Both are in the source, not in the
+import.
+
+### Getting the food onto the NAS
+
+Same problem as a workout plan, same answer. The importer reads a workbook, the
+workbooks are never pushed to the NAS, and openpyxl opening one needs more
+memory than the DS218play has free — and pushing the whole database instead is
+not an option once the dashboard is in use, because the NAS copy is the live one
+and holds weigh-ins and runs entered from a phone that no desktop has seen.
+
+`deploy/send_food.py` moves **only the four food tables**, matches foods to the
+NAS catalogue on **(list, name)** rather than by id, re-links every diary line
+to whatever the target's id turns out to be, and reads every day's four macro
+totals back afterwards to prove it arrived. A food already on the NAS is left
+alone unless you ask otherwise — a portion corrected on a phone should not be
+undone by a push from a stale desktop — while a day is replaced, because a day
+is saved wholesale everywhere else in this section. See
+[DEPLOY.md](deploy/DEPLOY.md).
+
+### Four extra catalogue rows
+
+`config.FOOD_EXTRA_FOODS` holds four foods the corrected diary refers to and the
+Food sheet never had. Two are ordinary — a Grenade bar eaten 167 times, and a
+jasmine rice — and two are placeholders: **Dinner** covers 261 lines and
+**Lunch** eight, nearly all of them meals out. Linking to a placeholder does not
+restate anything, because a diary line carries its own macros and the link only
+says what kind of thing it was; the 160 different dinners behind that label keep
+their own figures.
 
 ---
 
@@ -570,6 +700,7 @@ default 90-day view is about 60 KB.
 python reconcile_test.py    # every weigh-in figure against the workbook
 python run_test.py          # every run figure against the Strava sheet
 python workout_test.py      # every set and weight against the gym workbook
+python food_test.py         # every catalogue row and diary line against the food workbook
 python smoke_test.py        # the weigh-in write path, especially back-filling
 python web_test.py          # every Flask route, form and both navigations
 python streamlit_test.py    # every Streamlit page, with data and without
@@ -601,6 +732,10 @@ core/
   runs.py               runs: durations, paces, the ladder, validation
   run_mutations.py      runs: saving a run and its splits, atomically
   run_queries.py        runs: the splits by type, and the records
+  food.py               food: macros, portions, weeks, validation, the calculator
+  food_queries.py       food: days, weeks, the catalogue, the averages
+  food_mutations.py     food: saving a day, planning a week, the catalogue
+  food_import.py        the food workbook -> SQLite, and the diary CSV round trip
   excel_import.py       the weigh-in workbook -> SQLite
   strava_import.py      Final_data -> SQLite
   excel_export.py       SQLite -> .xlsx, on demand
@@ -616,8 +751,8 @@ views/                  Streamlit front-end
   run_frames.py         run queries -> DataFrames
   altair_charts.py      the weigh-in charts
   run_charts.py         the run charts
-  weigh_in/  runs/      the pages
-  placeholders.py       the two sections that are not built
+  weigh_in/ runs/ workouts/ diet/    the pages
+  placeholders.py       kept for a section that has not been designed yet
 deploy/                 NAS scripts, and the container files that are not used
 ```
 

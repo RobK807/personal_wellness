@@ -29,8 +29,7 @@ REAL_DB = Path(__file__).parent / "data" / "wellness.db"
 TEMP_DB = Path(tempfile.gettempdir()) / "wellness_streamlit_test.db"
 EMPTY_DB = Path(tempfile.gettempdir()) / "wellness_streamlit_empty.db"
 
-# module path -> what to call it in the output. Both sections' six pages, plus
-# one placeholder from each of the two that are not built.
+# module path -> what to call it in the output. Every page in every section.
 PAGES = [
     ("views.weigh_in.overview",     "render"),
     ("views.weigh_in.input_page",   "render"),
@@ -49,8 +48,12 @@ PAGES = [
     ("views.workouts.build_page",     "render"),
     ("views.workouts.tracker_page",   "render"),
     ("views.workouts.exercises_page", "render"),
-    ("views.placeholders",          "diet_log"),
-    ("views.placeholders",          "diet_analysis"),
+    ("views.diet.day_page",         "render"),
+    ("views.diet.week_page",        "render"),
+    ("views.diet.calculator_page",  "render"),
+    ("views.diet.foods_page",       "render"),
+    ("views.diet.targets_page",     "render"),
+    ("views.diet.analysis_page",    "render"),
 ]
 
 

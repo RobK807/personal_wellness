@@ -466,3 +466,112 @@ WORKOUT_BOUNDS = {
     "rounding_kg": (0.25, 10.0),
     "one_rm_kg": (1.0, 500.0),
 }
+
+
+# --------------------------------------------------------------------------- #
+# Food planner and diary
+# --------------------------------------------------------------------------- #
+# The workbook the section was built from. Importer only, and read-only.
+FOOD_XLSX = Path(_setting("FOOD_XLSX", str(EXCEL_DIR / "Food Planner v0.1.xlsx")))
+
+# The four macros, and nothing else. The workbook carried sodium and sugar
+# columns; they hold no data and are deliberately not imported.
+#
+#   key, label, unit, decimal places shown
+MACROS = [
+    ("calories", "Calories", "kcal", 0),
+    ("carbs",    "Carbs",    "g",    1),
+    ("fat",      "Fat",      "g",    1),
+    ("protein",  "Protein",  "g",    1),
+]
+
+MACRO_KEYS = [key for key, *_ in MACROS]
+MACRO_LABELS = {key: label for key, label, *_ in MACROS}
+MACRO_UNITS = {key: unit for key, _, unit, _ in MACROS}
+MACRO_DP = {key: dp for key, _, _, dp in MACROS}
+
+# The workbook's three lookup lists. Not categories of food - a way of finding
+# one: an Item is a single thing, a Meal is bought or assembled, a Recipe is
+# cooked. `grouping` is the sub-heading inside a list and is a different idea.
+FOOD_LISTS = ["Items", "Meals", "Recipes"]
+
+# The groupings each list actually uses, taken from the workbook. Offered by the
+# input form; the column is free text, so a new one needs no migration.
+FOOD_GROUPINGS = {
+    "Items":   ["Meal component", "Snack", "Dessert", "Protein", "Drink"],
+    "Meals":   ["Breakfast", "Lunch", "Dinner"],
+    "Recipes": ["Breakfast", "Lunch", "Dinner"],
+}
+
+# The meals a day is divided into, in the order they are eaten.
+MEALS = ["Breakfast", "Lunch", "Dinner", "Snacks"]
+
+# Catalogue rows the workbook's Food sheet does not have, but the corrected diary
+# refers to. Loaded alongside the workbook by `--catalogue`, so that a rebuilt
+# database still resolves every line of the diary.
+#
+# Two are ordinary foods that were simply never added to the sheet. The other two
+# are placeholders: "Dinner" covers 261 lines and "Lunch" eight, mostly meals
+# eaten out and estimated, and the macros here are the standing estimate rather
+# than a claim about any one of them. Linking to a placeholder does not restate a
+# diary line - a food_entries row carries its own macros, and the link only says
+# what kind of thing it was - so the 160 different dinners behind that label keep
+# their own figures.
+#
+#   list, name, grouping, portion, units, calories, carbs, fat, protein, note
+FOOD_EXTRA_FOODS = [
+    # "Protein", to sit with the four other Grenade bars already on the sheet
+    # rather than beside the fruit pastilles.
+    ("Items", "Grenade bar - Caramel Chaos", "Protein", 1.0, "Bar",
+     203.0, 21.0, 6.9, 21.0, "Eaten 167 times; never on the Food sheet"),
+    ("Items", "Jasmine rice", "Meal component", 50.0, "grams",
+     174.5, 38.8, 0.3, 3.95, "Eaten twice; never on the Food sheet"),
+    ("Meals", "Dinner", "Dinner", 1.0, "Portion",
+     830.0, 90.0, 30.0, 50.0, "Placeholder for a dinner out - a standing estimate"),
+    ("Meals", "Lunch", "Lunch", 1.0, "Portion",
+     665.0, 80.0, 25.0, 30.0, "Placeholder for a lunch out - a standing estimate"),
+]
+
+# The units the catalogue uses, commonest first. Free text on the way in - this
+# is a list of suggestions, not a closed set.
+FOOD_UNITS = ["Portion", "grams", "ml", "Bar", "Pot", "Slice", "Piece", "item",
+              "Pint", "mug", "egg", "biscuit", "roll", "sausage", "stick",
+              "sweet", "bunny", "Pizza", "Drink"]
+
+# Which day a planning week starts on: 0 is Monday, 6 is Sunday. The workbook
+# ran Monday to Sunday and the diary's "W/C" headers are all Mondays, so that is
+# the default - but the whole point of parameterising it is that a week is a
+# habit rather than a fact.
+WEEK_STARTS_ON = int(_setting("WEEK_STARTS_ON", "0"))
+
+WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                 "Saturday", "Sunday"]
+
+# The target profile a day uses when it does not name one.
+DEFAULT_TARGET = "Base"
+
+# The seed for macro_targets, from the workbook's Planner. Only used on a
+# database that has none - after that they are edited in the app, and dated, so
+# changing them never restates a day that has already happened.
+#
+#   name, calories, carbs, fat, protein
+FOOD_TARGET_SEED = [
+    ("Base", 1890.0, 170.0, 50.0, 190.0),
+]
+
+# Fat-finger guards, in the same spirit as RUN_BOUNDS. A day of 12,000 calories
+# is a typo; so is a single food with 900 g of protein.
+FOOD_BOUNDS = {
+    "calories": (0.0, 5000.0),
+    "carbs":    (0.0, 1000.0),
+    "fat":      (0.0, 1000.0),
+    "protein":  (0.0, 1000.0),
+    "quantity": (0.0001, 10000.0),
+    "portion":  (0.0001, 10000.0),
+    "scale":    (0.0001, 100.0),
+}
+
+# Where the diary export writes to, and reads back from. The history is two
+# years of free text and it is corrected by hand in a spreadsheet, so the round
+# trip is a file rather than a form - see core/diary_csv.py.
+DIARY_CSV = Path(_setting("DIARY_CSV", str(EXPORT_DIR / "food_diary.csv")))

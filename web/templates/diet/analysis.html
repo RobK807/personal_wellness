@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{# `with context`: an imported macro cannot see the template context
+   without it, so macro_keys and macro_labels would be undefined inside
+   these and every macro column would render empty - silently. #}
+{% import "diet/_macros.html" as m with context %}
+{% block title %}Analysis · Diet{% endblock %}
+
+{% block content %}
+<h1>Analysis</h1>
+
+<div class="metrics">
+  <div class="metric"><span class="label">Days recorded</span>
+    <span class="value">{{ coverage.days }}</span></div>
+  <div class="metric"><span class="label">Diary lines</span>
+    <span class="value">{{ '{:,}'.format(coverage.entries) }}</span></div>
+  <div class="metric"><span class="label">Linked to a food</span>
+    <span class="value">{{ '{:,}'.format(coverage.linked) }}</span>
+    <span class="unit">of {{ '{:,}'.format(coverage.entries) }}</span></div>
+  <div class="metric"><span class="label">Catalogue</span>
+    <span class="value">{{ totals.foods }}</span><span class="unit">foods</span></div>
+</div>
+{% if coverage.first_day %}
+<p class="caption">{{ coverage.first_day }} to {{ coverage.last_day }}. The
+  history has gaps — whole weeks the workbook never recorded — and they are left
+  as gaps rather than filled in with anything.</p>
+{% endif %}
+
+<form class="filters" method="get" action="{{ url_for('diet.analysis') }}">
+  <div class="field">
+    <label for="grain">Grouped</label>
+    <select id="grain" name="grain" onchange="this.form.submit()">
+      {% for name in grains %}
+      <option value="{{ name }}" {{ 'selected' if name == grain }}>{{ name | capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <p class="actions"><noscript><button type="submit">Show</button></noscript></p>
+</form>
+
+<h2>Average day</h2>
+<p class="caption">Per day, over the days that have something against them. A
+  month with four blank days did not average 1,400 calories, so those days are
+  left out rather than counted as zeros.</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Period</th><th class="num">Days</th>{{ m.headers() }}
+        <th class="num">vs target</th></tr>
+    </thead>
+    <tbody>
+      {% for row in periods %}
+      <tr>
+        <td>{{ row.period }}</td>
+        <td class="num">{{ row.days }}</td>
+        {{ m.cells(row) }}
+        <td class="num">
+          {%- if row.target_calories -%}
+          {{ (row.calories - row.target_calories) | delta('calories') }}
+          {%- else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>The last fortnight</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Day</th><th class="num">Lines</th>{{ m.headers() }}<th>Target</th></tr>
+    </thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td><a href="{{ url_for('diet.day', day=row.day) }}">{{ row.day }}</a></td>
+        <td class="num">{{ row.entries }}</td>
+        {{ m.cells(row) }}
+        <td class="small muted">{{ row.target_name or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Nothing recorded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if unmatched %}
+<h2>Lines with no food behind them</h2>
+<p class="caption">Free text — eaten out, or something never added to the
+  catalogue. Their macros count towards every total on this page; what they
+  cannot do is be looked up, re-used or corrected in one place. Adding the
+  common ones to the <a href="{{ url_for('diet.foods') }}">catalogue</a> is the
+  fix.</p>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Name</th><th class="num">Lines</th><th>First</th><th>Last</th></tr>
+    </thead>
+    <tbody>
+      {% for row in unmatched %}
+      <tr><td>{{ row.name }}</td><td class="num">{{ row.uses }}</td>
+        <td>{{ row.first_day }}</td><td>{{ row.last_day }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if trail %}
+<h2>Recently changed</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for row in trail %}
+      <tr><td class="small">{{ row.ts }}</td>
+        <td class="small">{{ row.action }}</td>
+        <td class="small muted">{{ row.detail }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
