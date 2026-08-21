@@ -413,7 +413,10 @@ def main() -> int:
 
     diary = args.diary or args.all
     remote = is_the_nas(args.target)
-    if remote and app_is_running():
+    # A dry run reads the source, prints what it would do and returns before it
+    # opens the target for writing, so there is no reason to make somebody take
+    # the dashboard down to find out what a transfer would move.
+    if remote and not args.dry_run and app_is_running():
         print(f"The dashboard is answering on {NAS_HOST}:{NAS_PORT}.\n\n"
               f"This writes SQLite over SMB, which is only safe with exactly "
               f"one writer. Stop it first:\n"
