@@ -1,8 +1,6 @@
 {% extends "base.html" %}
-{# `with context`: an imported macro cannot see the template context
-   without it, so macro_keys and macro_labels would be undefined inside
-   these and every macro column would render empty - silently. #}
 {% import "diet/_macros.html" as m with context %}
+{% import "diet/_foodpicker.html" as picker with context %}
 {% block title %}{{ week.label }} · Diet{% endblock %}
 
 {% block content %}
@@ -17,8 +15,8 @@
   <div class="field">
     <label for="starts_on">Starting on</label>
     {# Parameterised because a planning week is a habit rather than a fact. The
-       diary's history is Monday-based and its "w/c" labels say so, so Monday is
-       the default; this changes the look without changing the setting. #}
+       Admin page holds the standing answer; this changes one look without
+       changing it. #}
     <select id="starts_on" name="starts_on" onchange="this.form.submit()">
       {% for name in weekday_names %}
       <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == starts_on }}>
@@ -97,14 +95,67 @@
   </table>
 </div>
 
-{# The workbook's Planner in one button: set a day up properly, then paste it
-   across the rest of the week. #}
+{# ------------------------------------------------------------------------ #}
+{# The bulk planner: one table per meal, one row per day.                     #}
+{# ------------------------------------------------------------------------ #}
+<h2>Plan the whole week</h2>
+<p class="caption">
+  One line per meal per day. Fill in as much or as little as you like and press
+  the button once — anything left blank is skipped. <strong>Days that already
+  have entries are left alone</strong>, so this can never overwrite what is
+  already recorded; it says which ones it skipped.
+  For a day that needs more than one line per meal, use
+  <a href="{{ url_for('diet.day', day=week.start.isoformat()) }}">the Day page</a>.
+</p>
+
+<form method="post" action="{{ url_for('diet.plan_week') }}">
+  <input type="hidden" name="anchor" value="{{ week.start.isoformat() }}">
+  <input type="hidden" name="starts_on" value="{{ starts_on }}">
+
+  {% for block in bulk %}
+  <details class="panel meal-block" {{ 'open' if loop.first }}>
+    <summary><span class="move-name">{{ block.meal }}</span>
+      <span class="move-tags"><span class="tag quiet">7 days</span></span>
+    </summary>
+    <div>
+      {% for slot in block.rows %}
+      {% set flagged = alerts.get(slot.index) %}
+      <div class="entry-row bulk-row {{ 'taken' if slot.planned }}{{ ' flagged' if flagged }}">
+        <p class="bulk-day">
+          <strong>{{ slot.weekday }}</strong>
+          <span class="small muted">{{ slot.date.strftime('%d/%m') }}</span>
+          {% if slot.planned %}
+          <span class="tag warn">already has {{ slot.entries }}
+            line{{ '' if slot.entries == 1 else 's' }} — will be left alone</span>
+          {% endif %}
+        </p>
+        {{ picker.fields(slot) }}
+        {% if flagged %}
+          {{ picker.alert(slot, flagged) }}
+          <input type="hidden" name="row{{ slot.index }}_seen" value="1">
+        {% elif slot.seen %}
+          <input type="hidden" name="row{{ slot.index }}_seen" value="1">
+          {% if slot.resolve %}
+          <input type="hidden" name="row{{ slot.index }}_resolve" value="{{ slot.resolve }}">
+          {% endif %}
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+
+  <p class="actions">
+    <button class="primary" type="submit">Copy this into {{ week.label }}</button>
+  </p>
+</form>
+
+{# The other way of filling a week, kept because it answers a different
+   question: this one takes a day that is already right and repeats it. #}
 <div class="card">
-  <h3>Plan the week from one day</h3>
-  <p class="small muted">Copies every line of one day into the other six.
-    Days that already have entries are left alone unless you say otherwise,
-    because the usual shape of this is planning forward from a Monday that has
-    already happened.</p>
+  <h3>Or repeat one day across the week</h3>
+  <p class="small muted">Copies every line of one day into the other six. Days
+    that already have entries are left alone unless you say otherwise.</p>
   <form method="post" action="{{ url_for('diet.fill_week') }}">
     <input type="hidden" name="anchor" value="{{ week.start.isoformat() }}">
     <input type="hidden" name="starts_on" value="{{ starts_on }}">
@@ -119,7 +170,10 @@
           Overwrite days that already have entries</label>
       </div>
     </div>
-    <p class="actions"><button class="primary" type="submit">Fill the week</button></p>
+    <p class="actions"><button type="submit">Repeat it</button></p>
   </form>
 </div>
+
+{{ picker.shared(index, units) }}
+<script src="{{ url_for('static', filename='food-picker.js') }}"></script>
 {% endblock %}

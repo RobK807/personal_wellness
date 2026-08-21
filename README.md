@@ -494,13 +494,70 @@ the start is not a way of finding anything, and "what did I eat on the 12th" is
 the question being asked anyway. The four totals, what is left of each and how
 far through the target that is all sit above the editor.
 
-**Week** is seven days starting on whichever day `config.WEEK_STARTS_ON` names.
-The workbook ran Monday to Sunday and every "W/C" header in its diary is a
-Monday, so that is the default — but which day a planning week turns over on is
-a habit rather than a fact, and the picker changes the view without changing the
-setting. *Fill the week* is the workbook's Planner in one button: set one day up
-properly, then paste it across the rest. Days that already have entries are left
-alone unless you say otherwise, which is what makes it safe to press twice.
+Below that it is a grid: four meals, **eight slots each**, the shape the
+workbook's own day block had. A slot naming nothing is skipped, which is how
+thirty-two boxes stay harmless when six of them are in use.
+
+**Week** is seven days starting on whichever day the Admin page names. The
+workbook ran Monday to Sunday and every "W/C" header in its diary is a Monday, so
+that is the default — but which day a planning week turns over on is a habit
+rather than a fact, and the picker on the page changes one view without changing
+the setting.
+
+Two ways to fill it, because they answer different questions. **Plan the whole
+week** is a table per meal and a row per day — one line each, filled by picking
+or by typing, and copied across in one press. **Repeat one day** takes a day that
+is already right and pastes it into the rest. Neither can overwrite: days that
+already have entries are left alone and named in the result, so the usual job of
+planning Tuesday to Sunday around a Monday that has already happened works
+without having to clear anything first.
+
+### Picking a food: List, then Grouping, then the food
+
+Three controls in that order, and the first two are the whole point. The
+catalogue is 187 foods; picking the corner it lives in first cuts the third box
+to a dozen — Breakfast opens on six. Both start on whatever the **Admin** page
+says that meal usually is, and every row can still be changed.
+
+The food control is an `<input>` with a `<datalist>` rather than a `<select>`,
+which is what lets one control do both jobs: pick something that exists, or type
+something that does not. It also keeps the page small — thirty-two rows each
+carrying a 187-option `<select>` is a 250 KB page, where one shared datalist and
+a JSON index the browser filters is about 130 KB, most of which is the day's own
+markup.
+
+### A new name is checked before it becomes a food
+
+Type something the catalogue has never heard of and two things happen. First it
+is checked against every existing name — `core.food.close_matches()`, which
+scores an exact match after case and punctuation are set aside, one name
+containing another, and `difflib`'s ratio above `FOOD_MATCH_RATIO`. Anything
+close comes back as an **alert**, not a correction:
+
+> 'Chiken breast' looks like 'Chicken breast' (Items / Meal component).
+
+The alert is answered with a dropdown — *add it as new*, which is the default, or
+*use that one instead* — so doing nothing and saving again is a real answer. It
+is deliberately not a wall, because the whole reason free text exists is that
+sometimes the thing you ate really is new.
+
+Then, when it is saved, the name **is added to the catalogue**, filed under the
+List and Grouping showing beside it, with the macros as typed for the quantity
+that was eaten. It is exact-match only at that point: fuzzily folding "Chiken
+breast" into "Chicken breast" after somebody has already answered the alert would
+overrule them without saying so.
+
+### The number means what the units say it means
+
+Answering an alert with *use that one instead* changes the food underneath the
+quantity. Somebody writing "Chikken breast, 1" means one chicken breast; the
+catalogue records that per 100 grams, so carrying the 1 across would make it one
+**gram** — 1.37 calories, which is not a thing anybody has eaten and is the sort
+of wrong that saves quietly. So on a switch the number survives only if the units
+agree it is the same measure; otherwise it becomes one portion of the food
+actually chosen. Swapping a food in a row that already had one behaves the same
+way, in the browser and on the server, from the one rule in
+`food_queries.quantity_for()`.
 
 **Calculator** is the workbook's Calculator sheet. Components in — either a
 catalogue food and a quantity, or a name and four numbers off a packet — and the
@@ -608,6 +665,15 @@ alone unless you ask otherwise — a portion corrected on a phone should not be
 undone by a push from a stale desktop — while a day is replaced, because a day
 is saved wholesale everywhere else in this section. See
 [DEPLOY.md](deploy/DEPLOY.md).
+
+### The Admin page
+
+Preferences rather than data, so they live in a small key/value table and a blank
+one falls back to `config.py` rather than being stored as empty. Two things:
+where each meal's **List and Grouping** start, which is what keeps the food
+picker short; and which day a **planning week** turns over on, which changes
+which seven days the Week page puts side by side and touches no recorded day at
+all.
 
 ### Four extra catalogue rows
 
@@ -746,6 +812,7 @@ web/                    Flask front-end
   charts.py             hand-rolled SVG for the weigh-in charts
   run_charts.py         hand-rolled SVG for the run charts
   templates/            base.html, then one directory per section
+  static/food-picker.js the List -> Grouping -> food cascade, progressive only
 views/                  Streamlit front-end
   frames.py             weigh-in queries -> DataFrames
   run_frames.py         run queries -> DataFrames

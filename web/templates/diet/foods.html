@@ -23,6 +23,23 @@
     </select>
   </div>
   <div class="field">
+    <label for="grouping">Grouping</label>
+    {# Every grouping across every list, so this still narrows when no list is
+       chosen. Picking a pair that has nothing in it says so rather than
+       silently showing everything. #}
+    <select id="grouping" name="grouping" onchange="this.form.submit()">
+      <option value="">— any —</option>
+      {% for name in groupings.get(chosen, []) if chosen %}
+      <option value="{{ name }}" {{ 'selected' if name == chosen_grouping }}>{{ name }}</option>
+      {% endfor %}
+      {% if not chosen %}
+      {% for name in groupings.values() | map('list') | sum(start=[]) | unique | sort %}
+      <option value="{{ name }}" {{ 'selected' if name == chosen_grouping }}>{{ name }}</option>
+      {% endfor %}
+      {% endif %}
+    </select>
+  </div>
+  <div class="field">
     <label for="q">Search</label>
     <input type="search" id="q" name="q" value="{{ search }}" placeholder="name">
   </div>
@@ -169,21 +186,21 @@
     </div>
   </details>
   {% else %}
-  <p class="muted">Nothing matches. {% if search %}<a href="{{ url_for('diet.foods',
-    list=chosen) }}">Clear the search</a>.{% endif %}</p>
+  <p class="muted">Nothing matches.
+    <a href="{{ url_for('diet.foods') }}">Clear the filters</a>.</p>
   {% endfor %}
 </div>
 
 {% if page_count > 1 %}
 <p class="actions">
   {% if page > 1 %}
-  <a class="button small" href="{{ url_for('diet.foods', list=chosen, q=search,
-     page=page - 1) }}">← Previous</a>
+  <a class="button small" href="{{ url_for('diet.foods', list=chosen, grouping=chosen_grouping,
+     q=search, page=page - 1) }}">← Previous</a>
   {% endif %}
   <span class="small muted">Page {{ page }} of {{ page_count }}</span>
   {% if page < page_count %}
-  <a class="button small" href="{{ url_for('diet.foods', list=chosen, q=search,
-     page=page + 1) }}">Next →</a>
+  <a class="button small" href="{{ url_for('diet.foods', list=chosen, grouping=chosen_grouping,
+     q=search, page=page + 1) }}">Next →</a>
   {% endif %}
 </p>
 <p class="caption">Searching or picking a list is quicker than turning pages —
@@ -195,7 +212,7 @@
   {% for unit in units %}<option value="{{ unit }}">{% endfor %}
 </datalist>
 <datalist id="food-groupings">
-  {% for name, values in groupings.items() %}
+  {% for values in groupings.values() %}
     {% for value in values %}<option value="{{ value }}">{% endfor %}
   {% endfor %}
 </datalist>

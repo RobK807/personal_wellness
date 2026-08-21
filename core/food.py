@@ -171,6 +171,90 @@ def split_description(text: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# "Did you mean"
+# --------------------------------------------------------------------------- #
+def normalise(name: str) -> str:
+    """A food name reduced to what is worth comparing.
+
+    Case, punctuation and runs of whitespace all go, because they are the three
+    things that differ between two spellings of the same food and none of them
+    changes what it is. "Sainsbury's Basmati Rice" and "sainsburys basmati rice"
+    come out identical, which is the point.
+    """
+    text = str(name or "").casefold()
+    text = re.sub(r"[^\w\s]", " ", text)
+    return " ".join(text.split())
+
+
+def close_matches(name: str, candidates: Iterable[Mapping],
+                  limit: int | None = None,
+                  ratio: float | None = None) -> list:
+    """Catalogue rows whose name is nearly `name`, best first.
+
+    For catching "Chiken breast" before it becomes the 188th food in a list that
+    already has "Chicken breast" in it. Deliberately an alert rather than a
+    correction - the whole reason free text exists is that sometimes the thing
+    you ate really is new, and a picker that quietly substituted the nearest
+    name would make the diary wrong in a way nobody would ever notice.
+
+    Three ways of being close, in descending order of confidence:
+
+      1.0   the same name once case and punctuation are set aside
+      0.95  one name contains the other - "Banana" in "Banana bread", which is
+            worth flagging precisely because it is *not* the same food
+      -     difflib's ratio, above config.FOOD_MATCH_RATIO
+
+    An exact match is included rather than filtered out, because the caller
+    decides what an exact match means: on the day form it is a food being
+    chosen, and on the catalogue form it is a duplicate being refused.
+    """
+    import difflib
+
+    wanted = normalise(name)
+    if not wanted:
+        return []
+    ratio = config.FOOD_MATCH_RATIO if ratio is None else float(ratio)
+    limit = config.FOOD_MATCH_LIMIT if limit is None else int(limit)
+
+    scored = []
+    for row in candidates:
+        other = normalise(row.get("name"))
+        if not other:
+            continue
+        if other == wanted:
+            score = 1.0
+        elif wanted in other or other in wanted:
+            # Guarded by length: "a" inside "banana" is not a near miss, it is
+            # a substring, and every food in the catalogue would match it.
+            shorter = min(len(wanted), len(other))
+            score = 0.95 if shorter >= 4 else 0.0
+        else:
+            score = difflib.SequenceMatcher(None, wanted, other).ratio()
+        if score >= ratio:
+            scored.append((score, row))
+
+    scored.sort(key=lambda pair: (-pair[0], str(pair[1].get("name") or "")))
+    return [{**row, "score": round(score, 3)} for score, row in scored[:limit]]
+
+
+def match_alert(name: str, matches: Sequence[Mapping]) -> str:
+    """The sentence an alert says. One place, so both front-ends say it."""
+    if not matches:
+        return ""
+    first = matches[0]
+    exact = first.get("score", 0) >= 1.0
+    where = f"{first.get('list')}"
+    if first.get("grouping"):
+        where += f" / {first['grouping']}"
+    lead = (f"'{name}' is already in the catalogue as '{first['name']}'"
+            if exact else
+            f"'{name}' looks like '{first['name']}'")
+    more = (f", and {len(matches) - 1} other"
+            f"{'' if len(matches) == 2 else 's'}" if len(matches) > 1 else "")
+    return f"{lead} ({where}){more}."
+
+
+# --------------------------------------------------------------------------- #
 # Weeks
 # --------------------------------------------------------------------------- #
 def week_start(day, starts_on: int | None = None) -> dt.date:

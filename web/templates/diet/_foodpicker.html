@@ -1,29 +1,106 @@
-{# The catalogue dropdown, and the one copy of the catalogue behind all of them.
+{# The food picker: List, then Grouping, then the food itself.
 
-   The first cut of this carried each food's portion, units and four macros as
-   data- attributes on every <option>. That is correct and it is also 187 foods
-   times six attributes times eleven dropdowns: the day page came to 579 KB, for
-   a phone on the other end of a Tailscale link. The macros are now written once
-   as JSON and the options carry nothing but their id, which is the same page at
-   about a fifth of the weight.
+   Three controls because 187 foods in one dropdown is a list you scroll rather
+   than read. The first two narrow the third, and both start on whatever the
+   Admin page says that meal usually is - so picking a snack offers a dozen
+   snacks, not the whole catalogue.
 
-   Grouped with <optgroup> rather than "(Items)" after every name - it reads
-   better and it is shorter. #}
+   The food control is an <input> with a <datalist> rather than a <select>, and
+   that is what lets one control do two jobs: choose something that exists, or
+   type something that does not. A name that matches nothing becomes a
+   free-text line and a new catalogue row filed under the List and Grouping
+   showing beside it.
 
-{% macro options(catalogue, selected=none, blank='— free text —') %}
-<option value="">{{ blank }}</option>
-{% for list_name, rows in catalogue | groupby('list') %}
-<optgroup label="{{ list_name }}">
-  {% for row in rows %}
-  <option value="{{ row.id }}" {{ 'selected' if selected and row.id == selected }}>{{ row.name }}</option>
+   It is also what keeps the page small. Thirty-two rows each carrying a
+   187-option <select> is a 250 KB page; one shared datalist plus a JSON index
+   is about 35 KB, and the browser rebuilds a filtered datalist per row. #}
+
+{% macro fields(slot, prefix='row', compact=false) %}
+{% set n = slot.index %}
+<div class="pick" data-pick>
+  <div class="field pick-list">
+    <label for="{{ prefix }}{{ n }}_list">List</label>
+    <select id="{{ prefix }}{{ n }}_list" name="{{ prefix }}{{ n }}_list"
+            data-pick-list>
+      {% for name in lists %}
+      <option value="{{ name }}" {{ 'selected' if name == slot.list }}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field pick-grouping">
+    <label for="{{ prefix }}{{ n }}_grouping">Grouping</label>
+    <select id="{{ prefix }}{{ n }}_grouping" name="{{ prefix }}{{ n }}_grouping"
+            data-pick-grouping data-selected="{{ slot.grouping or '' }}">
+      <option value="">— any —</option>
+      {% for name in groupings.get(slot.list, []) %}
+      <option value="{{ name }}" {{ 'selected' if name == slot.grouping }}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field pick-food">
+    <label for="{{ prefix }}{{ n }}_name">Food</label>
+    <input type="text" id="{{ prefix }}{{ n }}_name" name="{{ prefix }}{{ n }}_name"
+           value="{{ slot.name }}" list="food-names" autocomplete="off"
+           placeholder="pick one, or type something new" data-pick-name>
+  </div>
+  <div class="field pick-qty">
+    <label for="{{ prefix }}{{ n }}_quantity">Qty</label>
+    <input type="number" step="any" min="0" id="{{ prefix }}{{ n }}_quantity"
+           name="{{ prefix }}{{ n }}_quantity" value="{{ slot.quantity }}"
+           data-pick-quantity>
+  </div>
+  <div class="field pick-units">
+    <label for="{{ prefix }}{{ n }}_units">Units</label>
+    <input type="text" id="{{ prefix }}{{ n }}_units" name="{{ prefix }}{{ n }}_units"
+           value="{{ slot.units }}" list="food-units" data-pick-units>
+  </div>
+</div>
+<div class="row four macro-row">
+  {% for key in macro_keys %}
+  <div class="field">
+    <label for="{{ prefix }}{{ n }}_{{ key }}">{{ macro_labels[key] }}</label>
+    <input type="number" step="any" min="0" id="{{ prefix }}{{ n }}_{{ key }}"
+           name="{{ prefix }}{{ n }}_{{ key }}" value="{{ slot[key] }}"
+           data-pick-macro="{{ key }}">
+  </div>
   {% endfor %}
-</optgroup>
-{% endfor %}
+</div>
 {% endmacro %}
 
-{# The lookup the fill-in script reads: food id -> portion, units, macros. Built
-   in the blueprint rather than here, because a template that reshapes data is a
-   template that has to be read to find out what a page contains. #}
-{% macro catalogue_json(lookup) %}
-<script id="food-catalogue" type="application/json">{{ lookup | tojson }}</script>
+
+{# The "did you mean" alert. Shown once per new name, answered with a dropdown
+   rather than a pair of buttons so that it works without scripting and so that
+   doing nothing is a real answer: leave it on "add as new" and save again. #}
+{% macro alert(slot, entry, prefix='row') %}
+<div class="match-alert">
+  <p class="small"><strong>{{ entry.message }}</strong></p>
+  <div class="field">
+    <label for="{{ prefix }}{{ slot.index }}_resolve">What should this be?</label>
+    <select id="{{ prefix }}{{ slot.index }}_resolve"
+            name="{{ prefix }}{{ slot.index }}_resolve">
+      <option value="">Add '{{ entry.name }}' as a new food</option>
+      {% for match in entry.matches %}
+      <option value="{{ match.id }}">Use '{{ match.name }}' instead
+        ({{ match.list }}{{ ' / ' ~ match.grouping if match.grouping }},
+        {{ match.calories | macro('calories') }} kcal per
+        {{ '%g' | format(match.portion) }} {{ match.units }})</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+{% endmacro %}
+
+
+{# Written into the page once. The datalist is the no-scripting fallback - a
+   plain autocomplete over everything - and the JSON is what the script filters
+   per row when a List or Grouping changes. #}
+{% macro shared(index, units) %}
+<datalist id="food-names">
+  {% for row in index %}<option value="{{ row.name }}">{% endfor %}
+</datalist>
+<datalist id="food-units">
+  {% for unit in units %}<option value="{{ unit }}">{% endfor %}
+</datalist>
+<script id="food-catalogue" type="application/json">{{ index | tojson }}</script>
+<script id="food-groupings" type="application/json">{{ groupings | tojson }}</script>
 {% endmacro %}

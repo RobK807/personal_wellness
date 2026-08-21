@@ -40,21 +40,80 @@ def macro_tiles(totals, target=None, columns=None) -> None:
             help=f"Target {food.fmt_macro(key, target.get(key), with_unit=True)}")
 
 
-def pick_food(label: str = "Food", key: str = "food", allow_none: bool = True,
-              catalogue=None):
-    """The catalogue dropdown. Returns the food row, or None for free text.
+def pick_filters(key: str, meal: str | None = None, columns=None) -> tuple:
+    """The List and Grouping dropdowns that narrow a food picker.
 
-    Grouped by list in the label rather than filtered by it: 187 foods is short
-    enough to scroll and Streamlit's selectbox filters as you type, so a second
-    dropdown to narrow the first would be one more thing to get wrong.
+    The point of them: 187 foods in one box is a list you scroll rather than
+    read, and picking the corner of the catalogue first cuts it to a dozen. They
+    open on whatever the Admin page says that meal usually is.
+    """
+    defaults = fq.meal_defaults()
+    fallback = defaults.get(meal or "", (config.FOOD_LISTS[0], ""))
+    groups = fq.groupings_by_list()
+    left, right = columns or st.columns(2)
+
+    list_name = left.selectbox(
+        "List", config.FOOD_LISTS,
+        index=config.FOOD_LISTS.index(fallback[0])
+        if fallback[0] in config.FOOD_LISTS else 0,
+        key=f"{key}_list")
+    available = groups.get(list_name, [])
+    grouping = right.selectbox(
+        "Grouping", [None] + available,
+        index=(available.index(fallback[1]) + 1)
+        if fallback[1] in available else 0,
+        format_func=lambda value: value or "— any —",
+        key=f"{key}_grouping")
+    return list_name, grouping
+
+
+def pick_food(label: str = "Food", key: str = "food", list_name=None,
+              grouping=None, catalogue=None):
+    """The food dropdown, narrowed by List and Grouping. Returns a row or None.
+
+    Streamlit can afford to keep this a real dropdown - there is no page weight
+    to worry about the way there is on the Flask side, and its selectbox filters
+    as you type. Free text is a separate box below rather than the same control,
+    because Streamlit has no equivalent of an <input> with a datalist.
     """
     rows = catalogue if catalogue is not None else fq.foods()
-    labels = {row["id"]: f"{row['name']} · {row['list']}" for row in rows}
+    narrowed = [row for row in rows
+                if (not list_name or row["list"] == list_name)
+                and (not grouping or row["grouping"] == grouping)]
+    if not narrowed:
+        st.caption("Nothing in the catalogue under those two yet — "
+                   "type a name below and it will be added there.")
+        return None
+    labels = {row["id"]: f"{row['name']} · "
+                         f"{food.fmt_macro('calories', row['calories'])} kcal "
+                         f"per {food.fmt_quantity(row['portion'], row['units'])}"
+              for row in narrowed}
     chosen = st.selectbox(
-        label, list(labels), index=None, key=key,
-        placeholder="— free text —" if allow_none else "Pick a food",
+        f"{label} ({len(narrowed)} to choose from)", list(labels), index=None,
+        key=key, placeholder="— or type a new one below —",
         format_func=lambda value: labels[value])
-    return next((row for row in rows if row["id"] == chosen), None)
+    return next((row for row in narrowed if row["id"] == chosen), None)
+
+
+def match_alert(name: str, key: str):
+    """Show the "did you mean" alert, and return what to do about it.
+
+    Returns None for "add it as new", or a catalogue row to use instead. An
+    alert rather than a correction: the whole reason free text exists is that
+    sometimes the thing you ate really is new.
+    """
+    matches = food.close_matches(name, fq.foods(include_retired=True))
+    if not matches:
+        return None, False
+    st.warning(food.match_alert(name, matches))
+    labels = {0: f"Add '{name}' as a new food"}
+    for row in matches:
+        labels[row["id"]] = (f"Use '{row['name']}' instead ({row['list']}"
+                             + (f" / {row['grouping']}" if row["grouping"]
+                                else "") + ")")
+    chosen = st.radio("What should this be?", list(labels), key=key,
+                      format_func=lambda value: labels[value])
+    return (fq.food_row(chosen) if chosen else None), True
 
 
 def day_table(when) -> list:

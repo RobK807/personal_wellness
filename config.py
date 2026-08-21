@@ -538,6 +538,36 @@ FOOD_UNITS = ["Portion", "grams", "ml", "Bar", "Pot", "Slice", "Piece", "item",
               "Pint", "mug", "egg", "biscuit", "roll", "sausage", "stick",
               "sweet", "bunny", "Pizza", "Drink"]
 
+# How many lines each meal can hold in a day. Eight, because that is what the
+# workbook's Snacks block held and it was the longest of the four - its
+# Breakfast block had one row, which is a spreadsheet's answer to "how many do
+# you usually have" rather than a limit anybody chose.
+MAX_ENTRIES_PER_MEAL = 8
+
+# Where a new line's List and Grouping dropdowns start, per meal. Only the
+# starting point - every line can be changed - and only used when the Admin page
+# has not been given something better; see the food_settings table.
+#
+#   meal: (list, grouping)
+FOOD_MEAL_DEFAULTS = {
+    "Breakfast": ("Meals",   "Breakfast"),
+    "Lunch":     ("Recipes", "Lunch"),
+    "Dinner":    ("Recipes", "Dinner"),
+    "Snacks":    ("Items",   "Snack"),
+}
+
+# How alike two food names have to be before one is offered as "did you mean".
+# 0.82 on difflib's ratio catches a transposition or a missing letter in a name
+# of ordinary length - "Chiken breast" against "Chicken breast" is 0.93 - while
+# leaving "Banana" and "Lasagne" well apart. Tuned down and it starts suggesting
+# that a pear is an apple, which trains you to dismiss the alert without
+# reading it, and an alert nobody reads is worse than none.
+FOOD_MATCH_RATIO = float(_setting("FOOD_MATCH_RATIO", "0.82"))
+
+# How many suggestions an alert offers. More than three is a decision rather
+# than a nudge.
+FOOD_MATCH_LIMIT = 3
+
 # Which day a planning week starts on: 0 is Monday, 6 is Sunday. The workbook
 # ran Monday to Sunday and the diary's "W/C" headers are all Mondays, so that is
 # the default - but the whole point of parameterising it is that a week is a

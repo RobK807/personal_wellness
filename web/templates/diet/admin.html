@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Admin · Diet{% endblock %}
+
+{% block content %}
+<h1>Admin</h1>
+<p class="caption">
+  Preferences rather than data. Everything here has a built-in default, so
+  clearing a setting hands it back rather than pinning it to nothing.
+</p>
+
+<form method="post" action="{{ url_for('diet.admin') }}">
+  <div class="card">
+    <h3>Where a new line starts</h3>
+    <p class="small muted">
+      The <strong>List</strong> and <strong>Grouping</strong> each meal's rows
+      open on, on the Day page and in the week planner. This is what stops the
+      food box being 187 items long — pick the meal and the picker is already
+      narrowed to the kind of thing that meal usually is. Every row can still be
+      changed, and a food typed into a row is filed under whatever those two are
+      showing at the time.
+    </p>
+
+    {% for meal in meals %}
+    {% set chosen = defaults[meal] %}
+    <div class="row three admin-meal">
+      <div class="field">
+        <label for="list_{{ meal }}">{{ meal }} — List</label>
+        <select id="list_{{ meal }}" name="list:{{ meal }}">
+          {% for name in lists %}
+          <option value="{{ name }}" {{ 'selected' if name == chosen[0] }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="grouping_{{ meal }}">{{ meal }} — Grouping</label>
+        <select id="grouping_{{ meal }}" name="grouping:{{ meal }}">
+          <option value="">— any —</option>
+          {% for name in groupings.get(chosen[0], []) %}
+          <option value="{{ name }}" {{ 'selected' if name == chosen[1] }}>{{ name }}</option>
+          {% endfor %}
+          {# A grouping set here and then renamed in the catalogue would vanish
+             from the list above and be silently reset on the next save. Kept as
+             an option of its own so it survives, and so it is visible that it
+             no longer matches anything. #}
+          {% if chosen[1] and chosen[1] not in groupings.get(chosen[0], []) %}
+          <option value="{{ chosen[1] }}" selected>{{ chosen[1] }} — no foods use this</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="field">
+        <p class="small muted">
+          {%- set stored_list = stored.get('default_list:' ~ meal) -%}
+          {%- set stored_group = stored.get('default_grouping:' ~ meal) -%}
+          {% if stored_list or stored_group %}Set here.{% else %}
+          Built-in: {{ config_defaults.get(meal, ('Items', ''))[0] }}
+          {{ ' / ' ~ config_defaults[meal][1] if config_defaults.get(meal) and config_defaults[meal][1] }}.
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>The week</h3>
+    <div class="row three">
+      <div class="field">
+        <label for="week_starts_on">A planning week starts on</label>
+        <select id="week_starts_on" name="week_starts_on">
+          {% for name in weekday_names %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == starts_on }}>
+            {{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <p class="small muted">
+          The imported history is Monday-based and its "w/c" labels say so, but
+          which day a <em>planning</em> week turns over on is a habit. Changing
+          this does not touch a single recorded day — it changes which seven the
+          Week page puts side by side. Built-in:
+          {{ weekday_names[config_starts_on] }}.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p class="actions"><button class="primary" type="submit">Save</button></p>
+</form>
+
+<div class="card">
+  <h3>Fixed here, not settable</h3>
+  <ul class="small">
+    <li><strong>{{ per_meal }} lines per meal</strong> on the Day page — the
+      shape of the workbook's own day block, and its longest one.</li>
+    <li><strong>Near-miss sensitivity {{ '%g' | format(match_ratio) }}</strong> —
+      how alike two names have to be before one is offered as "did you mean".
+      Lower it and it starts suggesting a pear is an apple, which trains you to
+      dismiss the alert without reading it. Set <code>PW_FOOD_MATCH_RATIO</code>
+      to change it.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3>What is in here</h3>
+  <div class="metrics">
+    <div class="metric"><span class="label">Days recorded</span>
+      <span class="value">{{ coverage.days }}</span></div>
+    <div class="metric"><span class="label">Diary lines</span>
+      <span class="value">{{ '{:,}'.format(coverage.entries) }}</span></div>
+    <div class="metric"><span class="label">Linked to a food</span>
+      <span class="value">{{ '{:,}'.format(coverage.linked) }}</span>
+      <span class="unit">of {{ '{:,}'.format(coverage.entries) }}</span></div>
+  </div>
+  <p class="small muted">Database <code>{{ db_path }}</code><br>
+    Workbook <code>{{ workbook }}</code> — read by the importer only, and only
+    on a desktop.</p>
+</div>
+{% endblock %}

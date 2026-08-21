@@ -22,7 +22,7 @@ them.
 
 What it touches
 ---------------
-**Only the four food tables.** The weigh-ins, the runs, the run option lists and
+**Only the five food tables.** The weigh-ins, the runs, the run option lists and
 every workout table on the NAS are never read from the source and never written.
 
 Ids are **not** carried across. The catalogue exists independently on both sides,
@@ -71,7 +71,8 @@ from deploy.send_plan import (NAS_HOST, NAS_PORT, TARGET_DB,  # noqa: E402
                               TransferError, app_is_running, backup, connect,
                               is_the_nas)
 
-FOOD_TABLES = ("foods", "macro_targets", "food_days", "food_entries")
+FOOD_TABLES = ("foods", "macro_targets", "food_days", "food_entries",
+               "food_settings")
 
 
 # --------------------------------------------------------------------------- #
@@ -97,6 +98,7 @@ def read_food(conn, start=None, end=None, diary: bool = True) -> dict:
         "foods": _rows(conn, "SELECT * FROM foods ORDER BY list, name"),
         "targets": _rows(conn, "SELECT * FROM macro_targets "
                                "ORDER BY name, starts_on"),
+        "settings": _rows(conn, "SELECT key, value FROM food_settings"),
         "days": [],
         "entries": [],
     }
@@ -208,6 +210,27 @@ def write_targets(target, rows: list, overwrite: bool) -> tuple:
     return added, updated
 
 
+def write_settings(target, rows: list, overwrite: bool) -> list:
+    """The Admin page's preferences - where a new line's List and Grouping start.
+
+    Same rule as a food: one the target already has is left alone. These are set
+    on whichever front-end is actually used, which is the NAS, so a push from a
+    desktop should seed them on a database that has none and then keep quiet.
+    """
+    written = []
+    for row in rows:
+        found = target.execute("SELECT key FROM food_settings WHERE key = ?",
+                               (row["key"],)).fetchone()
+        if found is not None and not overwrite:
+            continue
+        target.execute(
+            "INSERT INTO food_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
+            "updated_at = datetime('now')", (row["key"], row["value"]))
+        written.append(row["key"])
+    return written
+
+
 def write_food(target, data: dict, overwrite_foods: bool,
                skip_existing_days: bool) -> dict:
     """Insert the catalogue, the targets and the diary. Caller owns the
@@ -220,6 +243,8 @@ def write_food(target, data: dict, overwrite_foods: bool,
     food_map, added, updated = map_foods(target, data["foods"], overwrite_foods)
     targets_added, targets_updated = write_targets(target, data["targets"],
                                                    overwrite_foods)
+    settings_added = write_settings(target, data.get("settings", []),
+                                    overwrite_foods)
 
     days_written, days_skipped, unlinked = 0, 0, []
     by_day: dict = {}
@@ -261,6 +286,7 @@ def write_food(target, data: dict, overwrite_foods: bool,
     return {
         "foods_added": added, "foods_updated": updated,
         "targets_added": targets_added, "targets_updated": targets_updated,
+        "settings": settings_added,
         "days": days_written, "days_skipped": days_skipped,
         "entries": sum(len(by_day.get(day["day"], [])) for day in data["days"]),
         "unlinked": unlinked,
@@ -281,7 +307,8 @@ def send(target_path: Path, diary: bool, start, end, overwrite_foods: bool,
         source.close()
 
     print(f"  catalogue : {len(data['foods'])} foods, "
-          f"{len(data['targets'])} target versions")
+          f"{len(data['targets'])} target versions, "
+          f"{len(data.get('settings', []))} settings")
     if diary:
         print(f"  diary     : {len(data['days'])} days, "
               f"{len(data['entries'])} entries"
@@ -438,7 +465,8 @@ def main() -> int:
     print()
     print(f"Catalogue: {len(result['foods_added'])} foods added, "
           f"{len(result['foods_updated'])} updated, "
-          f"{len(result['targets_added'])} target versions added")
+          f"{len(result['targets_added'])} target versions added, "
+          f"{len(result['settings'])} settings seeded")
     if diary:
         print(f"Diary    : {result['days']} days written, "
               f"{result['entries']} entries"

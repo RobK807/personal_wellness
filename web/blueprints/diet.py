@@ -1,14 +1,15 @@
 """The food planner and diary.
 
-Six pages:
+Seven pages:
 
     day         one day, picked by date - the landing page, because the thing
                 that actually gets done is checking today against the target
-    week        seven days at the width config says a week is, and the paste
-                that plans them from one
+    week        seven days at the width the settings say a week is, plus the
+                bulk planner that fills them from one form
     calculator  components in, macros out, with a scaling factor
-    foods       the catalogue behind every dropdown
+    foods       the catalogue behind every picker
     targets     the named, dated macro profiles a day is measured against
+    admin       where a new line's List and Grouping start, and the week's shape
     analysis    two years of diary, averaged
 
 The day page is the workbook's DailyCheck sheet, and the one thing it does
@@ -17,8 +18,23 @@ by week-and-day. A diary with 48 of 137 possible weeks in it cannot be navigated
 by counting from the start, and "what did I eat on the 12th" is the question
 being asked anyway.
 
-Entries are saved a whole day at a time - see the note on food_mutations.save_day
-about why they are replaced rather than diffed.
+Picking a food
+--------------
+Three controls, in this order: **List**, then **Grouping**, then the food. The
+first two narrow the third from 187 options to a dozen, which is the difference
+between a dropdown you scroll and one you read. Both start on whatever the Admin
+page says that meal usually is.
+
+The food control is an `<input>` with a `<datalist>` rather than a `<select>`,
+which is what lets one control do both jobs: pick an existing food, or type one
+that does not exist yet. A typed name that matches nothing becomes a free-text
+line *and* a new catalogue row, filed under the List and Grouping showing beside
+it. Before that happens the name is checked against the catalogue and anything
+close is raised as an alert - see `_alerts()`.
+
+It also keeps the page small. Thirty-two rows each carrying a 187-option select
+is a 250 KB page; one shared datalist and a JSON index is about 35 KB, and the
+browser filters it per row.
 """
 from __future__ import annotations
 
@@ -33,11 +49,9 @@ from web.app import login_required
 
 bp = Blueprint("diet", __name__)
 
-# How many blank lines the day form offers below whatever is already there, and
-# how many rows the calculator has. Fixed-size forms, the same way the session
+# How many rows the calculator has. A fixed-size form, the same way the session
 # builder is: a slot left empty is skipped, which is what lets the form be one
-# shape and the day be any length up to it.
-BLANK_ROWS = 4
+# shape and the thing being built be any size up to it.
 CALCULATOR_ROWS = 10
 
 # How many foods the catalogue page shows at once - see the note in foods().
@@ -70,18 +84,23 @@ def _shell(**extra) -> dict:
     }
 
 
-def _catalogue_lookup(rows: list) -> dict:
-    """id -> what the fill-in script needs, written into the page once.
+def _picker(**extra) -> dict:
+    """What a page with food pickers on it needs, on top of _shell().
 
-    The dropdowns carry ids and nothing else; this is the other half. Keeping it
-    to one copy is the difference between a 100 KB page and a 580 KB one, which
-    over a Tailscale link to a phone is the difference between the page opening
-    and the page eventually opening.
+    The catalogue goes out once as JSON and the browser filters it per row. See
+    the note at the top about what the alternative costs.
     """
-    return {row["id"]: {"portion": row["portion"], "units": row["units"],
-                        "name": row["name"],
-                        **{key: row[key] for key in config.MACRO_KEYS}}
-            for row in rows}
+    rows = fq.foods()
+    return {
+        "catalogue": rows,
+        "index": fq.catalogue_index(rows),
+        "lists": config.FOOD_LISTS,
+        "groupings": fq.groupings_by_list(),
+        "meal_defaults": fq.meal_defaults(),
+        "units": config.FOOD_UNITS,
+        "meals": config.MEALS,
+        **extra,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -96,103 +115,168 @@ def day():
     totals, what is left of each, and how far through the target that is.
     """
     when = _date_arg()
+    return _render_day(when)
+
+
+def _render_day(when: dt.date, grid=None, alerts=None):
     row = fq.day(when)
     sheet = fq.day_sheet(when)
     totals = food.add_macros(fq.entries(when))
-    # `chosen_target`, not `target_name`: the first is what this day asked for
-    # and the second is what it ends up measured against - see v_food_days.
+    # `chosen_target` is what this day asked for; `target_name` is what it ends
+    # up measured against. Every imported day chose nothing - see v_food_days.
     target = fq.target_for(when, row["chosen_target"] if row else None) \
         or fq.target_for(when)
-    catalogue = fq.foods()
 
     return render_template(
         "diet/day.html",
         **_shell(),
+        **_picker(),
         day=when,
         row=row,
         sheet=sheet,
+        grid=grid if grid is not None else _day_grid(when),
+        alerts=alerts or {},
         totals=totals,
         target=target,
         remaining=food.remaining(totals, target or {}),
         pct=food.pct_of_target(totals, target or {}),
         weekday=food.day_name(when),
-        week_label=food.week_label(when),
+        week_label=food.week_label(when, fq.week_starts_on()),
         previous=when - dt.timedelta(days=1),
         next_day=when + dt.timedelta(days=1),
-        catalogue=catalogue,
-        lookup=_catalogue_lookup(catalogue),
-        recent=fq.recent_foods(12),
         target_names=fq.target_names(),
-        meals=config.MEALS,
-        units=config.FOOD_UNITS,
-        blanks=range(BLANK_ROWS),
+        per_meal=config.MAX_ENTRIES_PER_MEAL,
     )
+
+
+def _day_grid(when: dt.date, form=None) -> list:
+    """The day as a fixed grid: one block per meal, eight slots in each.
+
+    Eight because that is what was asked for and what the workbook's longest
+    block held. The grid is built here rather than in the template so that the
+    row numbering - which is what ties a form field back to a slot - is decided
+    in one place, and so that redisplaying a rejected form is the same code path
+    as displaying a saved day.
+    """
+    defaults = fq.meal_defaults()
+    by_meal: dict = {}
+    if form is None:
+        for entry in fq.entries(when):
+            by_meal.setdefault(entry["meal"], []).append(entry)
+
+    grid, index = [], 0
+    for meal in config.MEALS:
+        default_list, default_grouping = defaults.get(meal, ("Items", ""))
+        entries = by_meal.get(meal, [])
+        slots = []
+        for slot in range(config.MAX_ENTRIES_PER_MEAL):
+            index += 1
+            if form is not None:
+                slots.append(_slot_from_form(form, index, default_list,
+                                             default_grouping))
+                continue
+            entry = entries[slot] if slot < len(entries) else None
+            catalogue = fq.food_row(entry["food_id"]) if entry \
+                and entry["food_id"] else None
+            slots.append({
+                "index": index,
+                "name": entry["name"] if entry else "",
+                "list": (catalogue or {}).get("list") or default_list,
+                "grouping": (catalogue or {}).get("grouping")
+                            or (default_grouping if entry is None else ""),
+                "quantity": (entry or {}).get("quantity") or "",
+                "units": (entry or {}).get("units") or "",
+                "seen": "",
+                "resolve": "",
+                **{key: (entry[key] if entry else "")
+                   for key in config.MACRO_KEYS},
+            })
+        grid.append({"meal": meal, "slots": slots, "list": default_list,
+                     "grouping": default_grouping,
+                     "filled": len(entries)})
+    return grid
+
+
+def _slot_from_form(form, index: int, default_list: str,
+                    default_grouping: str) -> dict:
+    return {
+        "index": index,
+        "name": (form.get(f"row{index}_name") or "").strip(),
+        "list": form.get(f"row{index}_list") or default_list,
+        "grouping": form.get(f"row{index}_grouping", default_grouping),
+        "quantity": (form.get(f"row{index}_quantity") or "").strip(),
+        "units": (form.get(f"row{index}_units") or "").strip(),
+        "seen": form.get(f"row{index}_seen") or "",
+        "resolve": form.get(f"row{index}_resolve") or "",
+        **{key: (form.get(f"row{index}_{key}") or "").strip()
+           for key in config.MACRO_KEYS},
+    }
 
 
 @bp.route("/day/save", methods=["POST"])
 @login_required
 def save_day():
     when = _date_arg()
+    grid = _day_grid(when, request.form)
+    rows = _entries_from_grid(grid)
+
+    alerts = _alerts(rows)
+    if alerts:
+        one = len(alerts) == 1
+        flash(f"{len(alerts)} name{'' if one else 's'} "
+              f"{'looks' if one else 'look'} like something already in the "
+              f"catalogue. Pick what to do with {'it' if one else 'each'} and "
+              f"save again — or leave "
+              f"{'it' if one else 'them'} as {'it is' if one else 'they are'} "
+              f"to add {'it' if one else 'them'} as new.", "warn")
+        return _render_day(when, grid=grid, alerts=alerts)
+
     try:
-        saved = fm.save_day(when, _entries_from_form(request.form),
+        saved = fm.save_day(when, [row["entry"] for row in rows],
                             target_name=request.form.get("target_name") or None,
                             note=request.form.get("note"))
     except food.InvalidFood as exc:
         flash(str(exc), "error")
-    else:
-        flash(f"Saved {when:%a %d/%m/%Y} - {saved['entries']} "
-              f"line{'' if saved['entries'] == 1 else 's'}.", "ok")
+        return _render_day(when, grid=grid)
+
+    message = (f"Saved {when:%a %d/%m/%Y} — {saved['entries']} "
+               f"line{'' if saved['entries'] == 1 else 's'}")
+    if saved["added"]:
+        message += (f", and added "
+                    + ", ".join(f"'{row['name']}'" for row in saved["added"])
+                    + " to the catalogue")
+    flash(message + ".", "ok")
     return redirect(url_for("diet.day", day=when.isoformat()))
 
 
-def _entries_from_form(form) -> list:
-    """Read the day form back into the list save_day wants.
+def _entries_from_grid(grid: list) -> list:
+    """The grid's filled slots, as the list save_day wants.
 
-    Each row is either a catalogue food and a quantity, or a name and its macros
-    typed in - the second is what makes a meal out somewhere recordable at all,
-    and two years of the imported diary are exactly that. A row with neither is
-    skipped, which is how the blank lines at the bottom stay harmless.
+    A slot is filled if it names something. Everything else is skipped, which is
+    how thirty-two boxes stay harmless when six of them are in use.
 
-    The `_delete` checkbox is honoured here rather than by a separate route
-    because the day is saved wholesale: leaving a row out of the list is the
-    deletion.
+    Each row comes back with the slot beside it, because the caller may have to
+    redisplay the form and needs to know which box a complaint belongs to.
     """
-    entries = []
-    for index in _row_indexes(form, "row"):
-        if form.get(f"row{index}_delete"):
-            continue
-        food_id = (form.get(f"row{index}_food_id") or "").strip()
-        name = " ".join((form.get(f"row{index}_name") or "").split())
-        macros = {key: (form.get(f"row{index}_{key}") or "").strip()
-                  for key in config.MACRO_KEYS}
-        if not food_id and not name and not any(macros.values()):
-            continue
-        entries.append({
-            "meal": form.get(f"row{index}_meal") or config.MEALS[0],
-            "food_id": int(food_id) if food_id else None,
-            "name": name,
-            "quantity": (form.get(f"row{index}_quantity") or "").strip(),
-            "units": (form.get(f"row{index}_units") or "").strip(),
-            **macros,
-        })
-    return entries
+    rows = []
+    for block in grid:
+        for slot in block["slots"]:
+            if not slot["name"]:
+                continue
+            rows.append({"slot": slot, "meal": block["meal"],
+                         "entry": _entry_from_slot(slot, block["meal"])})
+    return rows
 
 
-def _row_indexes(form, prefix: str) -> list:
-    """The row numbers present in a form, in order.
+def _entry_from_slot(slot: dict, meal: str) -> dict:
+    """One slot as a diary line. The rules live in core so both fronts share
+    them - see food_queries.resolve_entry()."""
+    return fq.resolve_entry(slot, meal)
 
-    Read off the form rather than assumed, so the existing lines and the blank
-    ones below them can be numbered in one sequence without the template and the
-    parser having to agree in advance on how many there are.
-    """
-    found = set()
-    for key in form.keys():
-        if not key.startswith(prefix):
-            continue
-        number = key[len(prefix):].split("_", 1)[0]
-        if number.isdigit():
-            found.add(int(number))
-    return sorted(found)
+
+def _alerts(rows: list) -> dict:
+    """Slot index -> near misses. Also core's, for the same reason."""
+    return fq.alerts_for(rows)
 
 
 @bp.route("/day/delete", methods=["POST"])
@@ -204,7 +288,7 @@ def delete_day():
     except food.InvalidFood as exc:
         flash(str(exc), "error")
     else:
-        flash(f"Cleared {when:%a %d/%m/%Y} - {gone['entries']} lines.", "ok")
+        flash(f"Cleared {when:%a %d/%m/%Y} — {gone['entries']} lines.", "ok")
     return redirect(url_for("diet.day", day=when.isoformat()))
 
 
@@ -218,7 +302,7 @@ def copy_day():
     except food.InvalidFood as exc:
         flash(str(exc), "error")
         return redirect(url_for("diet.day", day=target.isoformat()))
-    flash(f"Copied {source:%d/%m/%Y} into {target:%d/%m/%Y} - "
+    flash(f"Copied {source:%d/%m/%Y} into {target:%d/%m/%Y} — "
           f"{made['entries']} lines.", "ok")
     return redirect(url_for("diet.day", day=target.isoformat()))
 
@@ -229,17 +313,21 @@ def copy_day():
 @bp.route("/week")
 @login_required
 def week():
-    """Seven days, starting on whichever day config names.
+    """Seven days, plus the bulk planner that fills them.
 
-    The start day is a parameter rather than a Monday: the diary's history is
-    Monday-based and the "w/c" labels say so, but which day a planning week turns
-    over on is a habit, and changing it should not need a migration. `?starts_on`
-    overrides it for one look without changing the setting.
+    The start day comes from the Admin page rather than being a Monday: the
+    diary's history is Monday-based and the "w/c" labels say so, but which day a
+    planning week turns over on is a habit. `?starts_on` overrides it for one
+    look without changing the setting.
     """
-    anchor = _date_arg()
-    starts_on = request.args.get("starts_on", type=int)
+    return _render_week(_date_arg(), request.args.get("starts_on", type=int))
+
+
+def _render_week(anchor: dt.date, starts_on=None, bulk=None, alerts=None):
     if starts_on is not None and not 0 <= starts_on <= 6:
         starts_on = None
+    if starts_on is None:
+        starts_on = fq.week_starts_on()
     data = fq.week(anchor, starts_on)
 
     planned = [row for row in data["days"] if row["planned"]]
@@ -249,21 +337,119 @@ def week():
     return render_template(
         "diet/week.html",
         **_shell(),
+        **_picker(),
         anchor=anchor,
         week=data,
         planned=len(planned),
         averages=averages,
         target=fq.target_for(data["start"]),
-        starts_on=config.WEEK_STARTS_ON if starts_on is None else starts_on,
+        starts_on=starts_on,
         weekday_names=config.WEEKDAY_NAMES,
         previous=data["start"] - dt.timedelta(days=7),
         next_week=data["start"] + dt.timedelta(days=7),
+        bulk=bulk if bulk is not None else _bulk_grid(data),
+        alerts=alerts or {},
     )
+
+
+def _bulk_grid(data: dict, form=None) -> list:
+    """The bulk planner: one table per meal, one row per day.
+
+    Deliberately one line per meal per day rather than eight. This is the "same
+    breakfast all week" tool; anything more detailed is a day at a time on the
+    Day page, and a 7x4x8 form would be 224 rows nobody would fill in.
+
+    Every row carries its own List and Grouping, pre-filled from the Admin
+    page's defaults for that meal - which is what makes a week of breakfasts two
+    dropdowns and seven names rather than twenty-eight dropdowns.
+    """
+    defaults = fq.meal_defaults()
+    grid, index = [], 0
+    for meal in config.MEALS:
+        default_list, default_grouping = defaults.get(meal, ("Items", ""))
+        rows = []
+        for offset, day in enumerate(data["days"]):
+            index += 1
+            slot = (_slot_from_form(form, index, default_list, default_grouping)
+                    if form is not None else
+                    {"index": index, "name": "", "list": default_list,
+                     "grouping": default_grouping, "quantity": "", "units": "",
+                     "seen": "", "resolve": "",
+                     **{key: "" for key in config.MACRO_KEYS}})
+            rows.append({**slot, "offset": offset, "date": day["date"],
+                         "weekday": day["weekday"], "planned": day["planned"],
+                         "entries": day["entries"]})
+        grid.append({"meal": meal, "rows": rows, "list": default_list,
+                     "grouping": default_grouping})
+    return grid
+
+
+@bp.route("/week/plan", methods=["POST"])
+@login_required
+def plan_week():
+    anchor = _date_arg("anchor")
+    starts_on = request.form.get("starts_on", type=int)
+    data = fq.week(anchor, starts_on if starts_on is not None
+                   else fq.week_starts_on())
+    grid = _bulk_grid(data, request.form)
+
+    rows = []
+    for block in grid:
+        for row in block["rows"]:
+            if not row["name"]:
+                continue
+            rows.append({"slot": row, "meal": block["meal"],
+                         "entry": {**_entry_from_slot(row, block["meal"]),
+                                   "day_offset": row["offset"]}})
+    if not rows:
+        flash("Nothing to copy across — fill in at least one row.", "error")
+        return _render_week(anchor, starts_on, bulk=grid)
+
+    alerts = _alerts(rows)
+    if alerts:
+        one = len(alerts) == 1
+        flash(f"{len(alerts)} name{'' if one else 's'} "
+              f"{'looks' if one else 'look'} like something already in the "
+              f"catalogue. Pick what to do with {'it' if one else 'each'} and "
+              f"copy again.", "warn")
+        return _render_week(anchor, starts_on, bulk=grid, alerts=alerts)
+
+    try:
+        made = fm.plan_week(data["start"], [row["entry"] for row in rows],
+                            starts_on)
+    except food.InvalidFood as exc:
+        flash(str(exc), "error")
+        return _render_week(anchor, starts_on, bulk=grid)
+
+    flash(_planned_message(made), "ok" if made["days"] else "warn")
+    return redirect(url_for("diet.week", day=data["start"].isoformat(),
+                            starts_on=starts_on))
+
+
+def _planned_message(made: dict) -> str:
+    """What the bulk planner says it did, including what it left alone."""
+    if not made["days"]:
+        return ("Nothing copied — every day you filled in already has entries, "
+                "and this never overwrites. Clear a day on its own page first.")
+    parts = [f"Copied {made['lines']} "
+             f"line{'' if made['lines'] == 1 else 's'} into "
+             f"{len(made['days'])} day{'' if len(made['days']) == 1 else 's'}"]
+    if made["skipped"]:
+        parts.append(
+            f"left {', '.join(f'{day:%a}' for day in made['skipped'])} alone "
+            f"— {'it' if len(made['skipped']) == 1 else 'they'} already had "
+            f"entries")
+    if made["added"]:
+        parts.append("added " + ", ".join(f"'{row['name']}'"
+                                          for row in made["added"])
+                     + " to the catalogue")
+    return "; ".join(parts) + "."
 
 
 @bp.route("/week/fill", methods=["POST"])
 @login_required
 def fill_week():
+    """Copy one whole day across the rest of its week - the Planner's paste."""
     anchor = _date_arg("anchor")
     starts_on = request.form.get("starts_on", type=int)
     try:
@@ -274,11 +460,12 @@ def fill_week():
         return redirect(url_for("diet.week", day=anchor.isoformat()))
 
     message = (f"Copied {made['source']:%d/%m/%Y} into "
-               f"{len(made['copied'])} day{'' if len(made['copied']) == 1 else 's'}")
+               f"{len(made['copied'])} day"
+               f"{'' if len(made['copied']) == 1 else 's'}")
     if made["skipped"]:
         message += (f"; left {len(made['skipped'])} alone because "
-                    f"{'it already had' if len(made['skipped']) == 1 else 'they already had'} "
-                    f"entries")
+                    f"{'it' if len(made['skipped']) == 1 else 'they'} already "
+                    f"had entries")
     flash(message + ".", "ok")
     return redirect(url_for("diet.week", day=anchor.isoformat(),
                             starts_on=starts_on))
@@ -296,9 +483,6 @@ def calculator():
     proportion of it taken because the pan made rather more than one portion.
     The scale applies to the total rather than to any row, which is the question
     being asked - "what is two thirds of this".
-
-    A GET is a blank sheet. Nothing is stored unless the answer is saved to the
-    catalogue, because most of what gets worked out here is a one-off.
     """
     rows, scale, result = [], 1.0, None
     if request.method == "POST":
@@ -327,18 +511,14 @@ def calculator():
                 flash(f"Saved '{saved['name']}' to {saved['list']}.", "ok")
                 return redirect(url_for("diet.foods", list=saved["list"]))
 
-    catalogue = fq.foods()
     return render_template(
         "diet/calculator.html",
         **_shell(),
-        catalogue=catalogue,
-        lookup=_catalogue_lookup(catalogue),
+        **_picker(),
         rows=rows,
         scale=scale,
         result=result,
         slots=range(1, CALCULATOR_ROWS + 1),
-        lists=config.FOOD_LISTS,
-        units=config.FOOD_UNITS,
         form=request.form if request.method == "POST" else None,
     )
 
@@ -355,14 +535,24 @@ def _built_from(result: dict) -> str:
 
 def _components_from_form(form) -> list:
     """The calculator's grid, as resolve_components wants it."""
-    return [{
-        "food_id": (form.get(f"c{slot}_food_id") or "").strip() or None,
-        "name": form.get(f"c{slot}_name") or "",
-        "quantity": (form.get(f"c{slot}_quantity") or "").strip() or None,
-        "units": form.get(f"c{slot}_units") or "",
-        **{key: (form.get(f"c{slot}_{key}") or "").strip()
-           for key in config.MACRO_KEYS},
-    } for slot in range(1, CALCULATOR_ROWS + 1)]
+    out = []
+    for slot in range(1, CALCULATOR_ROWS + 1):
+        name = (form.get(f"c{slot}_name") or "").strip()
+        row = {
+            "food_id": None,
+            "name": name,
+            "quantity": (form.get(f"c{slot}_quantity") or "").strip() or None,
+            "units": form.get(f"c{slot}_units") or "",
+            **{key: (form.get(f"c{slot}_{key}") or "").strip()
+               for key in config.MACRO_KEYS},
+        }
+        if name:
+            found = fq.food_by_name(name, form.get(f"c{slot}_list")) \
+                or fq.food_by_name(name)
+            if found is not None:
+                row["food_id"] = found["id"]
+        out.append(row)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -377,11 +567,11 @@ def foods():
         try:
             if action == "retire":
                 fm.retire_food(food_id, True)
-                flash("Retired - it drops out of the dropdowns and the diary "
+                flash("Retired — it drops out of the pickers and the diary "
                       "lines using it keep reading right.", "ok")
             elif action == "restore":
                 fm.retire_food(food_id, False)
-                flash("Back in the dropdowns.", "ok")
+                flash("Back in the pickers.", "ok")
             elif action == "delete":
                 gone = fm.delete_food(food_id)
                 flash(f"Deleted '{gone['name']}'.", "ok")
@@ -396,16 +586,14 @@ def foods():
     chosen = request.args.get("list")
     if chosen not in config.FOOD_LISTS:
         chosen = None
-    rows = fq.foods(list_name=chosen, search=request.args.get("q"),
-                    include_retired=True)
+    grouping = request.args.get("grouping") or None
+    rows = fq.foods(list_name=chosen, grouping=grouping,
+                    search=request.args.get("q"), include_retired=True)
 
     # Paged, because every card carries a whole edit form: 187 of them is a
     # 630 KB page, which is not a thing to send a phone so that it can correct
-    # one portion size. The filter and the search are the other two ways of
-    # getting to a food, and both are faster than turning pages.
-    # `page_count`, not `pages`: base.html already binds `pages` to the tab
-    # strip, and a template variable that quietly shadows the navigation is a
-    # blank nav bar on one page and nobody knowing why.
+    # one portion size. The filters are the other way of getting to a food, and
+    # both are faster than turning pages.
     page_count = max(1, -(-len(rows) // PER_PAGE))
     page = min(max(request.args.get("page", type=int) or 1, 1), page_count)
     start = (page - 1) * PER_PAGE
@@ -419,9 +607,10 @@ def foods():
         page_count=page_count,
         usage=fq.food_usage(),
         chosen=chosen,
+        chosen_grouping=grouping,
         search=request.args.get("q") or "",
         lists=config.FOOD_LISTS,
-        groupings=config.FOOD_GROUPINGS,
+        groupings=fq.groupings_by_list(),
         units=config.FOOD_UNITS,
         counts={name: len(fq.foods(list_name=name, include_retired=True))
                 for name in config.FOOD_LISTS},
@@ -462,6 +651,49 @@ def targets():
         in_force=fq.target_for(dt.date.today()),
         names=fq.target_names(),
         default_name=config.DEFAULT_TARGET,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Admin
+# --------------------------------------------------------------------------- #
+@bp.route("/admin", methods=["GET", "POST"])
+@login_required
+def admin():
+    """Where a new line's List and Grouping start, and the week's shape.
+
+    Preferences rather than data, which is why they live in food_settings and
+    why a blank one falls back to config rather than being stored as empty -
+    see the note on that table.
+    """
+    if request.method == "POST":
+        values = {}
+        for meal in config.MEALS:
+            values[f"default_list:{meal}"] = request.form.get(f"list:{meal}")
+            values[f"default_grouping:{meal}"] = \
+                request.form.get(f"grouping:{meal}")
+        values["week_starts_on"] = request.form.get("week_starts_on")
+        fm.save_settings(values)
+        flash("Saved. New lines start here from now on.", "ok")
+        return redirect(url_for("diet.admin"))
+
+    return render_template(
+        "diet/admin.html",
+        **_shell(),
+        lists=config.FOOD_LISTS,
+        groupings=fq.groupings_by_list(),
+        meals=config.MEALS,
+        defaults=fq.meal_defaults(),
+        config_defaults=config.FOOD_MEAL_DEFAULTS,
+        stored=fq.settings(),
+        starts_on=fq.week_starts_on(),
+        config_starts_on=config.WEEK_STARTS_ON,
+        weekday_names=config.WEEKDAY_NAMES,
+        per_meal=config.MAX_ENTRIES_PER_MEAL,
+        match_ratio=config.FOOD_MATCH_RATIO,
+        coverage=fq.coverage(),
+        db_path=config.DB_PATH,
+        workbook=config.FOOD_XLSX,
     )
 
 

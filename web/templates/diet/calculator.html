@@ -14,49 +14,21 @@
 
 <form method="post" action="{{ url_for('diet.calculator') }}">
   {% for slot in slots %}
-  <div class="card entry-row {{ 'blank' if not (form and form.get('c' ~ slot ~ '_food_id')
-                                                  or form and form.get('c' ~ slot ~ '_name')) }}">
-    <div class="row three">
-      <div class="field">
-        <label for="c{{ slot }}_food_id">Component {{ slot }}</label>
-        <select id="c{{ slot }}_food_id" name="c{{ slot }}_food_id" data-macro-source>{{
-          picker.options(catalogue,
-                         (form.get('c' ~ slot ~ '_food_id') | int) if form else none,
-                         '— type it in below —') }}</select>
-      </div>
-      <div class="field">
-        <label for="c{{ slot }}_quantity">Quantity</label>
-        <input type="number" step="any" min="0" id="c{{ slot }}_quantity"
-               name="c{{ slot }}_quantity"
-               value="{{ form.get('c' ~ slot ~ '_quantity', '') if form }}">
-      </div>
-      <div class="field">
-        <label for="c{{ slot }}_units">Units</label>
-        <input type="text" id="c{{ slot }}_units" name="c{{ slot }}_units"
-               list="food-units" value="{{ form.get('c' ~ slot ~ '_units', '') if form }}">
-      </div>
-    </div>
-    <div class="row three">
-      <div class="field">
-        <label for="c{{ slot }}_name">Or a name</label>
-        <input type="text" id="c{{ slot }}_name" name="c{{ slot }}_name"
-               value="{{ form.get('c' ~ slot ~ '_name', '') if form }}"
-               placeholder="something off a packet">
-      </div>
-    </div>
-    <div class="row four">
-      {% for key in macro_keys %}
-      <div class="field">
-        <label for="c{{ slot }}_{{ key }}">{{ macro_labels[key] }}</label>
-        <input type="number" step="any" min="0" id="c{{ slot }}_{{ key }}"
-               name="c{{ slot }}_{{ key }}"
-               value="{{ form.get('c' ~ slot ~ '_' ~ key, '') if form }}">
-      </div>
-      {% endfor %}
-    </div>
-    <p class="small muted">Macros typed here are <em>per unit</em> and multiplied
-      by the quantity. A component from the catalogue is scaled by its portion
-      instead.</p>
+  {% set row = {'index': slot,
+                'name':     (form.get('c' ~ slot ~ '_name', '') if form else ''),
+                'list':     (form.get('c' ~ slot ~ '_list', lists[0]) if form else lists[0]),
+                'grouping': (form.get('c' ~ slot ~ '_grouping', '') if form else ''),
+                'quantity': (form.get('c' ~ slot ~ '_quantity', '') if form else ''),
+                'units':    (form.get('c' ~ slot ~ '_units', '') if form else ''),
+                'calories': (form.get('c' ~ slot ~ '_calories', '') if form else ''),
+                'carbs':    (form.get('c' ~ slot ~ '_carbs', '') if form else ''),
+                'fat':      (form.get('c' ~ slot ~ '_fat', '') if form else ''),
+                'protein':  (form.get('c' ~ slot ~ '_protein', '') if form else '')} %}
+  <div class="entry-row {{ 'blank' if not row.name }}">
+    {{ picker.fields(row, prefix='c') }}
+    <p class="small muted">Pick a food and its macros are scaled by its own
+      portion. Type a name the catalogue does not have and the macros here are
+      taken as <em>per unit</em> and multiplied by the quantity.</p>
   </div>
   {% endfor %}
 
@@ -113,7 +85,7 @@
   <h3>Save this to the catalogue</h3>
   <form method="post" action="{{ url_for('diet.calculator') }}">
     {% for slot in slots %}
-      {% for suffix in ['food_id', 'quantity', 'units', 'name'] + macro_keys %}
+      {% for suffix in ['list', 'grouping', 'quantity', 'units', 'name'] + macro_keys %}
       <input type="hidden" name="c{{ slot }}_{{ suffix }}"
              value="{{ form.get('c' ~ slot ~ '_' ~ suffix, '') if form }}">
       {% endfor %}
@@ -161,36 +133,6 @@
 {% endif %}
 {% endif %}
 
-<datalist id="food-units">
-  {% for unit in units %}<option value="{{ unit }}">{% endfor %}
-</datalist>
-
-{{ picker.catalogue_json(lookup) }}
-<script>
-(function () {
-  var KEYS = {{ macro_keys | tojson }};
-  var node = document.getElementById('food-catalogue');
-  var FOODS = node ? JSON.parse(node.textContent) : {};
-  document.querySelectorAll('[data-macro-source]').forEach(function (select) {
-    select.addEventListener('change', function () {
-      var row = select.closest('.entry-row');
-      var item = row && FOODS[select.value];
-      if (!item) return;
-      // A catalogue component is scaled server-side by its own portion, so
-      // these boxes are only a starting point for the quantity - and the typed
-      // macros are cleared, because a row cannot be both.
-      var qty = row.querySelector('[name$="_quantity"]');
-      if (qty && !qty.value) qty.value = item.portion || 1;
-      var units = row.querySelector('[name$="_units"]');
-      if (units && !units.value) units.value = item.units || '';
-      KEYS.forEach(function (key) {
-        var box = row.querySelector('[name$="_' + key + '"]');
-        if (box) box.value = '';
-      });
-      var name = row.querySelector('[name$="_name"]');
-      if (name) name.value = '';
-    });
-  });
-})();
-</script>
+{{ picker.shared(index, units) }}
+<script src="{{ url_for('static', filename='food-picker.js') }}"></script>
 {% endblock %}

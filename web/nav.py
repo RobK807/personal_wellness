@@ -48,6 +48,7 @@ PAGES = {
         ("diet.foods",           "Foods",    "Catalogue"),
         ("diet.targets",         "Targets",  "Targets"),
         ("diet.analysis",        "Analysis", "Analysis"),
+        ("diet.admin",           "Admin",    "Admin"),
     ],
 }
 

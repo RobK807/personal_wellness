@@ -4,6 +4,11 @@ Addressed by date rather than by week-and-day, which is the one thing it does
 differently from the sheet it replaces: a diary with 48 of a possible 137 weeks
 in it cannot be navigated by counting from the start, and "what did I eat on the
 12th" is the question anyway.
+
+Each meal holds up to config.MAX_ENTRIES_PER_MEAL lines, and the picker narrows
+by List and then Grouping before it offers a food - see views/diet/shared.py.
+A name the catalogue has never heard of becomes a free-text line *and* a new
+catalogue row, filed under those two, after a check for anything close.
 """
 from __future__ import annotations
 
@@ -38,14 +43,14 @@ def render() -> None:
     st.divider()
     _add_line(when)
     st.divider()
-    _edit(when, row, target)
+    _edit(when, row)
 
 
 def _date_row() -> dt.date:
     left, middle, right = st.columns([2, 1, 1])
     with left:
         when = shared.pick_date("Date")
-    middle.caption(food.week_label(when))
+    middle.caption(food.week_label(when, fq.week_starts_on()))
     if right.button("Today", width="stretch"):
         st.session_state["diet_day"] = dt.date.today()
         st.rerun()
@@ -55,69 +60,124 @@ def _date_row() -> dt.date:
 def _add_line(when) -> None:
     """One line at a time, because that is how eating happens.
 
-    Two ways in, and the second is not a fallback: a catalogue food and a
-    quantity, or a name and four numbers off a packet. Two years of the imported
-    history are the second kind, and a form that only offered the first would
-    not be able to record a meal out.
+    Two ways in, and the second is not a fallback: pick a food from the
+    narrowed list, or type a name and four numbers off a packet. Two years of
+    the imported history are the second kind, and a form that only offered the
+    first would not be able to record a meal out.
     """
     st.subheader("Add a line")
-    catalogue = fq.foods()
-    chosen = shared.pick_food("Food", key="day_add_food", catalogue=catalogue)
+    counts = _counts(when)
+    room = [meal for meal in config.MEALS
+            if counts.get(meal, 0) < config.MAX_ENTRIES_PER_MEAL]
+    if not room:
+        st.info(f"Every meal already has its {config.MAX_ENTRIES_PER_MEAL} "
+                f"lines. Remove one below to add another.")
+        return
 
-    with st.form("add_entry", clear_on_submit=True):
-        left, middle, right = st.columns(3)
-        meal = left.selectbox("Meal", config.MEALS)
-        quantity = middle.number_input(
-            "Quantity", min_value=0.0, step=1.0,
-            value=float(chosen["portion"]) if chosen else 1.0)
-        right.text_input("Units", key="add_units",
-                         value=chosen["units"] if chosen else "Portion",
-                         disabled=chosen is not None)
+    meal = st.selectbox(
+        "Meal", room,
+        format_func=lambda value: f"{value} "
+                                  f"({counts.get(value, 0)} of "
+                                  f"{config.MAX_ENTRIES_PER_MEAL})")
+    list_name, grouping = shared.pick_filters("day_add", meal)
+    chosen = shared.pick_food("Food", key="day_add_food",
+                              list_name=list_name, grouping=grouping)
 
-        if chosen is not None:
-            preview = food.eaten(chosen, quantity or chosen["portion"])
-            st.caption("Macros follow from the catalogue: "
-                       + ", ".join(f"{config.MACRO_LABELS[key]} "
-                                   f"{food.fmt_macro(key, preview[key])}"
-                                   for key in config.MACRO_KEYS))
-            name, macros = chosen["name"], {}
-        else:
-            name = st.text_input("Name", placeholder="Dinner out")
-            cells = st.columns(len(config.MACRO_KEYS))
-            macros = {key: cells[index].number_input(
-                          config.MACRO_LABELS[key], min_value=0.0, step=1.0,
-                          value=0.0, key=f"add_{key}")
-                      for index, key in enumerate(config.MACRO_KEYS)}
+    if chosen is not None:
+        _add_from_catalogue(when, meal, chosen)
+    else:
+        _add_free_text(when, meal, list_name, grouping)
 
+
+def _counts(when) -> dict:
+    out: dict = {}
+    for entry in fq.entries(when):
+        out[entry["meal"]] = out.get(entry["meal"], 0) + 1
+    return out
+
+
+def _add_from_catalogue(when, meal, chosen) -> None:
+    with st.form("add_from_catalogue", clear_on_submit=True):
+        quantity = st.number_input("Quantity", min_value=0.0, step=1.0,
+                                   value=float(chosen["portion"]))
+        preview = food.eaten(chosen, quantity or chosen["portion"])
+        st.caption(f"{food.fmt_quantity(quantity, chosen['units'])} — "
+                   + ", ".join(f"{config.MACRO_LABELS[key]} "
+                               f"{food.fmt_macro(key, preview[key])}"
+                               for key in config.MACRO_KEYS))
         if st.form_submit_button("Add", type="primary"):
-            _save_line(when, meal, chosen, name, quantity,
-                       st.session_state.get("add_units"), macros)
+            _append(when, {"meal": meal, "food_id": chosen["id"],
+                           "quantity": quantity})
 
 
-def _save_line(when, meal, chosen, name, quantity, units, macros) -> None:
-    """Append one line to the day, keeping everything already on it.
+def _add_free_text(when, meal, list_name, grouping) -> None:
+    """A name the catalogue has not got - checked, then remembered.
+
+    The check happens before the form is submitted rather than after, because
+    Streamlit reruns on every keystroke-ish interaction anyway and an alert that
+    appears as you type is one you read. The Flask side has to do the same thing
+    on the round trip; both end up calling core's close_matches().
+    """
+    name = st.text_input("Or a name the list has not got",
+                         placeholder="Dinner out", key="day_add_name")
+    if not name.strip():
+        return
+
+    instead, alerted = shared.match_alert(name, key="day_add_alert")
+    if instead is not None:
+        st.caption(f"Will record **{instead['name']}** from the catalogue.")
+
+    with st.form("add_free_text", clear_on_submit=True):
+        left, right = st.columns(2)
+        quantity = left.number_input("Quantity", min_value=0.0, step=1.0,
+                                     value=1.0)
+        units = right.text_input("Units", value="Portion")
+        cells = st.columns(len(config.MACRO_KEYS))
+        macros = {key: cells[index].number_input(
+                      config.MACRO_LABELS[key], min_value=0.0, step=1.0,
+                      value=0.0, key=f"free_{key}")
+                  for index, key in enumerate(config.MACRO_KEYS)}
+        st.caption(
+            f"Saving this adds **{name}** to the catalogue under "
+            f"**{list_name}{' / ' + grouping if grouping else ''}**, with these "
+            f"macros for {food.fmt_quantity(quantity, units)} of it."
+            if instead is None else
+            f"Saving this records the catalogue's **{instead['name']}** "
+            f"instead, and adds nothing.")
+        if st.form_submit_button("Add", type="primary"):
+            slot = {"name": name, "quantity": quantity, "units": units,
+                    "list": list_name, "grouping": grouping,
+                    "resolve": instead["id"] if instead else "",
+                    **macros}
+            _append(when, fq.resolve_entry(slot, meal))
+
+
+def _append(when, entry) -> None:
+    """Add one line, keeping everything already on the day.
 
     save_day() replaces a day wholesale, so the lines already there are read
     back and passed through with `_parsed` set - they have been through
     parse_entry once already and re-parsing a stored row would re-scale it.
     """
     existing = [{**row, "_parsed": True} for row in fq.entries(when)]
-    new = ({"meal": meal, "food_id": chosen["id"], "quantity": quantity}
-           if chosen is not None else
-           {"meal": meal, "name": name, "quantity": quantity, "units": units,
-            **macros})
+    day = fq.day(when) or {}
     try:
-        fm.save_day(when, existing + [new],
-                    target_name=(fq.day(when) or {}).get("chosen_target"),
-                    note=(fq.day(when) or {}).get("note"))
+        result = fm.save_day(when, existing + [entry],
+                             target_name=day.get("chosen_target"),
+                             note=day.get("note"))
     except food.InvalidFood as exc:
         st.error(str(exc))
+        return
+    if result["added"]:
+        st.success("Added, and put "
+                   + ", ".join(f"'{row['name']}'" for row in result["added"])
+                   + " in the catalogue.")
     else:
         st.success("Added.")
-        st.rerun()
+    st.rerun()
 
 
-def _edit(when, row, target) -> None:
+def _edit(when, row) -> None:
     """Correct or remove lines, set the day's target, copy another day in."""
     entries = fq.entries(when)
 

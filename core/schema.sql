@@ -775,6 +775,31 @@ CREATE TABLE IF NOT EXISTS foods (
 CREATE INDEX IF NOT EXISTS ix_foods_name ON foods (name);
 
 -- ---------------------------------------------------------------------------
+-- Settings for the food section, edited on its Admin page.
+--
+-- A key/value table rather than a column per setting, because these are
+-- preferences rather than data: adding one should not be a migration, and none
+-- of them is ever joined against anything. Everything here has a default in
+-- config.py, so a missing row means "whatever config says" rather than an error
+-- - which is what lets a database that predates a setting keep working.
+--
+-- What lives here:
+--
+--   default_list:<meal>       the List a new line in that meal starts on
+--   default_grouping:<meal>   the Grouping it starts on
+--   week_starts_on            0 for Monday through 6 for Sunday
+--
+-- The per-meal defaults are what stop the food picker being 187 items long:
+-- pick the meal and the List and Grouping are already narrowed to the kind of
+-- thing that meal usually is.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS food_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ---------------------------------------------------------------------------
 -- A named set of target macros, in force from a date.
 --
 -- Named because the workbook had two - Base and Workout - and a training day

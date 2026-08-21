@@ -47,8 +47,9 @@ def render() -> None:
 
 def _add(rows: list) -> None:
     st.subheader("Add a component")
-    catalogue = fq.foods()
-    chosen = shared.pick_food("Food", key="calc_food", catalogue=catalogue)
+    list_name, grouping = shared.pick_filters("calc")
+    chosen = shared.pick_food("Food", key="calc_food",
+                              list_name=list_name, grouping=grouping)
 
     with st.form("add_component", clear_on_submit=True):
         left, right = st.columns(2)

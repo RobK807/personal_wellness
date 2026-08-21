@@ -425,3 +425,45 @@ tr.flagged td { color: var(--muted); }
 
 tr.today td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 tr.today td:first-child { font-weight: 600; }
+
+/* The food picker: List, Grouping, food, quantity, units on one line where
+   there is room, stacked on a phone. The food box is the wide one because a
+   recipe name is long and the other four are not. */
+.pick { display: grid; gap: .5rem; margin-bottom: .3rem; }
+@media (min-width: 700px) {
+  .pick { grid-template-columns: 7rem 9rem 1fr 5rem 6rem; align-items: end; }
+}
+.pick .field { margin-bottom: 0; }
+.pick.is-new .pick-food input { border-color: var(--warn); }
+
+/* One meal's eight slots. The heading carries the count so a full meal is
+   obvious without counting boxes. */
+.meal-block h3 { display: flex; justify-content: space-between;
+                 align-items: baseline; gap: .5rem; }
+.meal-block h3 .rung-km { color: var(--muted); font-size: .75rem;
+                          font-weight: 400; }
+.meal-block .entry-row { border: 1px solid var(--border); border-radius: 8px;
+                         padding: .6rem; margin-bottom: .5rem;
+                         background: var(--surface); }
+.meal-block .entry-row.blank { border-style: dashed; background: transparent; }
+.meal-block .macro-row { margin-top: .3rem; }
+
+/* A name that looks like something already in the catalogue. Amber rather than
+   red: it is a question, and carrying on is a legitimate answer. */
+.entry-row.flagged { border-color: var(--warn); border-style: solid; }
+.match-alert { margin-top: .5rem; padding: .5rem .6rem; border-radius: 8px;
+               background: color-mix(in srgb, var(--warn) 10%, transparent);
+               border: 1px solid var(--warn); }
+.match-alert p { margin: 0 0 .4rem; }
+.match-alert .field { margin-bottom: 0; }
+
+/* The bulk week planner: the day is the row's heading rather than a column, so
+   it stays readable when the picker stacks on a phone. */
+.bulk-row { border: 1px solid var(--border); border-radius: 8px;
+            padding: .6rem; margin-bottom: .5rem; }
+.bulk-row.taken { background: color-mix(in srgb, var(--muted) 6%, transparent); }
+.bulk-day { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap;
+            margin: 0 0 .4rem; }
+
+.admin-meal { align-items: end; margin-bottom: .4rem; }
+.admin-meal .field p { margin: 0; }

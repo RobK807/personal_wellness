@@ -20,7 +20,8 @@ from core import db, metrics, queries, runs
 # views/placeholders.py is deliberately not imported: all four sections are
 # built now. It and web/templates/placeholder.html are kept as the shape a
 # fifth section starts in - see the note at the top of that module.
-from views.diet import (analysis_page as diet_analysis,
+from views.diet import (admin_page as diet_admin,
+                        analysis_page as diet_analysis,
                         calculator_page as diet_calculator,
                         day_page as diet_day, foods_page as diet_foods,
                         targets_page as diet_targets, week_page as diet_week)
@@ -89,6 +90,7 @@ PAGES = {
         ("Catalogue",  ":material/list:",            "diet-foods",      diet_foods.render),
         ("Targets",    ":material/flag:",            "diet-targets",    diet_targets.render),
         ("Analysis",   ":material/insights:",        "diet-analysis",   diet_analysis.render),
+        ("Admin",      ":material/settings:",        "diet-admin",      diet_admin.render),
     ],
 }
 

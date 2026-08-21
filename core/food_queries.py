@@ -11,6 +11,7 @@ target is resolved per day rather than joined once.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Mapping
 
 import config
 from core import db, food
@@ -63,6 +64,36 @@ def groupings(list_name: str | None = None) -> list:
         f"ORDER BY grouping", params)]
 
 
+def groupings_by_list(include_retired: bool = True) -> dict:
+    """List -> the groupings in it, from the catalogue and from config.
+
+    Both sources, because neither alone is right. The catalogue is what the
+    filter has to offer or it filters to nothing; config is what a *new* food
+    can be filed under before anything of that kind exists. Sorted together so
+    the dropdown does not have two halves.
+    """
+    out = {name: set(values)
+           for name, values in config.FOOD_GROUPINGS.items()}
+    for row in foods(include_retired=include_retired):
+        if row["grouping"]:
+            out.setdefault(row["list"], set()).add(row["grouping"])
+    return {name: sorted(values) for name, values in out.items()}
+
+
+def catalogue_index(rows=None) -> list:
+    """The catalogue as the pickers need it: id, name, list, grouping, macros.
+
+    One flat list written into a page once and filtered in the browser, rather
+    than 32 dropdowns each carrying every food. See the note in the Flask
+    blueprint about what that costs.
+    """
+    return [{"id": row["id"], "name": row["name"], "list": row["list"],
+             "grouping": row["grouping"] or "", "portion": row["portion"],
+             "units": row["units"],
+             **{key: row[key] for key in config.MACRO_KEYS}}
+            for row in (foods() if rows is None else rows)]
+
+
 def food_usage() -> dict:
     """Food id -> how many diary lines use it. What makes retiring safe."""
     return {row["food_id"]: row["uses"] for row in db.rows(
@@ -72,6 +103,51 @@ def food_usage() -> dict:
 
 def total_foods() -> int:
     return db.scalar("SELECT COUNT(*) FROM foods", default=0)
+
+
+# --------------------------------------------------------------------------- #
+# Settings
+# --------------------------------------------------------------------------- #
+def settings() -> dict:
+    """Everything in food_settings, as plain strings. Missing keys are absent.
+
+    Callers below fold config's defaults in; this is only what has been chosen.
+    Kept separate so the Admin page can show which settings have actually been
+    set and which are still inherited.
+    """
+    return {row["key"]: row["value"]
+            for row in db.rows("SELECT key, value FROM food_settings")}
+
+
+def meal_defaults() -> dict:
+    """meal -> (list, grouping) for a new line, settings over config.
+
+    The reason the picker is usable: pick the meal and the List and Grouping are
+    already narrowed to the kind of thing that meal usually is, so the food
+    dropdown is a dozen options rather than 187.
+    """
+    stored = settings()
+    out = {}
+    for meal in config.MEALS:
+        fallback = config.FOOD_MEAL_DEFAULTS.get(meal, ("Items", ""))
+        list_name = stored.get(f"default_list:{meal}") or fallback[0]
+        if list_name not in config.FOOD_LISTS:
+            list_name = config.FOOD_LISTS[0]
+        grouping = stored.get(f"default_grouping:{meal}")
+        if grouping is None:
+            grouping = fallback[1]
+        out[meal] = (list_name, grouping or "")
+    return out
+
+
+def week_starts_on() -> int:
+    """Which day a planning week turns over on, settings over config."""
+    raw = settings().get("week_starts_on")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return config.WEEK_STARTS_ON
+    return value if 0 <= value <= 6 else config.WEEK_STARTS_ON
 
 
 # --------------------------------------------------------------------------- #
@@ -238,6 +314,108 @@ def by_period(grain: str = "monthly", start=None, end=None) -> list:
         WHERE {' AND '.join(where)}
         GROUP BY period ORDER BY period
     """, params)
+
+
+# --------------------------------------------------------------------------- #
+# Turning what somebody typed into a diary line
+# --------------------------------------------------------------------------- #
+def quantity_for(catalogue, slot: Mapping, switched: bool = False):
+    """How much of `catalogue` a filled-in row means, given what was typed.
+
+    Straightforward when the name is the food: the number typed is the number
+    meant, and the units beside it agree because picking a food fills them.
+
+    `switched` is the case that needs care - an alert answered with "use that
+    one instead", where the food has changed underneath the number. Somebody
+    writing "Chikken breast, 1" means one chicken breast; the catalogue records
+    that per 100 grams, so carrying the 1 across makes it one *gram*, or 1.37
+    calories. That is not a thing anybody has eaten, and it is the sort of wrong
+    that saves quietly and is never noticed again.
+
+    So on a switch the number survives only if the units say it is the same kind
+    of measure. Otherwise it becomes one portion of the food actually chosen,
+    which is what "use that one instead" means.
+    """
+    quantity = slot.get("quantity") or None
+    if catalogue is None or not quantity:
+        return quantity
+    typed = str(slot.get("units") or "").strip().casefold()
+    theirs = str(catalogue.get("units") or "").strip().casefold()
+    if typed and typed == theirs:
+        return quantity            # the units agree; the number means what it says
+    if typed:
+        return catalogue.get("portion") or 1   # they disagree; the number does not
+    # No units given. On an ordinary row that is somebody typing "150" into a box
+    # next to a food they picked, and it means 150 of whatever that food is
+    # measured in - keep it. On a switch it is a number that was about a
+    # different food entirely, so it means nothing here.
+    return (catalogue.get("portion") or 1) if switched else quantity
+
+
+def resolve_entry(slot: Mapping, meal: str) -> dict:
+    """One filled-in row as a diary line. Shared by both front-ends.
+
+    Three cases:
+
+      * the alert was answered with "use that one instead" - `resolve` holds a
+        food id, and that food is what gets recorded
+      * the name is already in the catalogue - the line links to it and the
+        macros follow from the quantity
+      * the name is new - the line carries the macros as typed, and `remember`
+        asks save_day to file it under the List and Grouping chosen beside it
+    """
+    if slot.get("resolve"):
+        chosen = food_row(int(slot["resolve"]))
+        return {"meal": meal, "food_id": int(slot["resolve"]),
+                "quantity": quantity_for(chosen, slot, switched=True)}
+
+    name = str(slot.get("name") or "").strip()
+    existing = food_by_name(name, slot.get("list")) or food_by_name(name)
+    if existing is not None:
+        return {"meal": meal, "food_id": existing["id"],
+                "quantity": quantity_for(existing, slot)}
+
+    return {
+        "meal": meal,
+        "name": name,
+        "quantity": slot.get("quantity"),
+        "units": slot.get("units"),
+        "remember": True,
+        "list": slot.get("list"),
+        "grouping": slot.get("grouping"),
+        **{key: slot.get(key) for key in config.MACRO_KEYS},
+    }
+
+
+def alerts_for(rows) -> dict:
+    """Row index -> near misses, for the names about to become new foods.
+
+    Only for a name that is genuinely new, and only once: a row carrying `seen`
+    has already had its alert shown and answered, so saving again goes through.
+    That is what makes this an alert rather than a wall - the whole reason free
+    text exists is that sometimes the thing you ate really is new.
+
+    `rows` are {"slot": ..., "meal": ..., "entry": ...} as the front-ends build
+    them; the return is keyed on the slot's index so a complaint can be put back
+    beside the box it came from.
+    """
+    catalogue = foods(include_retired=True)
+    out = {}
+    for row in rows:
+        slot = row["slot"]
+        if slot.get("seen") or slot.get("resolve"):
+            continue
+        if "remember" not in row["entry"]:
+            continue
+        matches = food.close_matches(slot["name"], catalogue)
+        if matches:
+            out[slot["index"]] = {
+                "name": slot["name"],
+                "meal": row["meal"],
+                "matches": matches,
+                "message": food.match_alert(slot["name"], matches),
+            }
+    return out
 
 
 # --------------------------------------------------------------------------- #

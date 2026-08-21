@@ -143,6 +143,76 @@ def load_foods(rows: Sequence[Mapping], source: str = "xlsx") -> dict:
             "by_list": by_list}
 
 
+def remember_food(values: Mapping) -> dict | None:
+    """Add a food typed as free text to the catalogue, if it is not there.
+
+    What turns "I ate a thing the list has never heard of" into a catalogue
+    entry without a second trip to the Catalogue page. Called on the way through
+    save_day(), so the food exists by the time the diary line pointing at it is
+    written.
+
+    Returns the row it made, or None if that food was already there - so the
+    caller can say "and added it to the catalogue" only when it did.
+
+    Deliberately *not* fuzzy. The near-miss check is an alert shown to somebody
+    before they save; this runs after they have decided, and quietly folding
+    "Chiken breast" into "Chicken breast" here would overrule that decision
+    without saying so. Exact name in the same list, or it is a new food.
+    """
+    name = " ".join(str(values.get("name") or "").split())
+    list_name = str(values.get("list") or "").strip().title()
+    if not name or list_name not in config.FOOD_LISTS:
+        return None
+
+    existing = fq.food_by_name(name, list_name)
+    if existing is not None:
+        return None
+
+    # The macros are for the portion that was eaten, so that is the portion the
+    # catalogue row records - 600 kcal for 3 Slice, not a guess at what one
+    # slice comes to. Eating one later divides by three and gets 200.
+    quantity = food.parse_number(values.get("quantity"), "Quantity", "quantity",
+                                 required=False)
+    return save_food({
+        "name": name,
+        "list": list_name,
+        "grouping": values.get("grouping"),
+        "portion": quantity or 1,
+        "units": values.get("units") or "Portion",
+        "note": "Added from the diary",
+        **{key: values.get(key) or 0 for key in config.MACRO_KEYS},
+    })
+
+
+# --------------------------------------------------------------------------- #
+# Settings
+# --------------------------------------------------------------------------- #
+def save_settings(values: Mapping) -> dict:
+    """Write the food section's Admin settings. Only the keys given.
+
+    A blank value deletes the row rather than storing an empty string, so a
+    setting can be handed back to config's default instead of being pinned to
+    "nothing" - see the note on the food_settings table.
+    """
+    written, cleared = {}, []
+    with db.transaction() as conn:
+        for key, value in values.items():
+            text = "" if value is None else str(value).strip()
+            if text:
+                conn.execute(
+                    "INSERT INTO food_settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT (key) DO UPDATE SET value = excluded.value, "
+                    "updated_at = datetime('now')", (key, text))
+                written[key] = text
+            else:
+                conn.execute("DELETE FROM food_settings WHERE key = ?", (key,))
+                cleared.append(key)
+        db.log(conn, "settings", "food_settings", None,
+               ", ".join(f"{key}={value}" for key, value in written.items())
+               + (f"; cleared {', '.join(cleared)}" if cleared else ""))
+    return {"written": written, "cleared": cleared}
+
+
 # --------------------------------------------------------------------------- #
 # Targets
 # --------------------------------------------------------------------------- #
@@ -224,6 +294,7 @@ def save_day(when, entries: Sequence[Mapping], target_name: str | None = None,
     day = food.as_date(when)
     prepared = []
     counters: dict = {}
+    added: list = []
     for raw in entries:
         row = dict(raw)
         if row.get("food_id") and not row.get("_parsed"):
@@ -232,7 +303,21 @@ def save_day(when, entries: Sequence[Mapping], target_name: str | None = None,
                 raise InvalidFood(f"No food with id {row['food_id']}")
             row = food.parse_entry(row, catalogue)
         elif not row.get("_parsed"):
-            row = food.parse_entry(row)
+            # A free-text line asking to be remembered. Done here rather than
+            # inside the transaction below because save_food opens its own, and
+            # done *before* parse_entry so the line ends up linked to the food
+            # it just created rather than dangling as text beside it.
+            made = remember_food(row) if row.get("remember") else None
+            if made is not None:
+                added.append(made)
+                row = food.parse_entry({**row, "food_id": made["id"]},
+                                       fq.food_row(made["id"]))
+            else:
+                existing = (fq.food_by_name(row.get("name"), row.get("list"))
+                            if row.get("remember") else None)
+                row = food.parse_entry(
+                    {**row, "food_id": existing["id"] if existing else
+                     row.get("food_id")})
         counters[row["meal"]] = counters.get(row["meal"], 0) + 1
         row["position"] = counters[row["meal"]]
         prepared.append(row)
@@ -249,8 +334,9 @@ def save_day(when, entries: Sequence[Mapping], target_name: str | None = None,
         _write_entries(conn, day, prepared, source)
         db.log(conn, "save_day", "food_days", day.isoformat(),
                f"{len(prepared)} entries, "
-               f"{sum(row['calories'] for row in prepared):.0f} kcal")
-    return {"day": day, "entries": len(prepared)}
+               f"{sum(row['calories'] for row in prepared):.0f} kcal"
+               + (f"; added {len(added)} to the catalogue" if added else ""))
+    return {"day": day, "entries": len(prepared), "added": added}
 
 
 def _write_entries(conn: sqlite3.Connection, day: dt.date,
@@ -321,6 +407,60 @@ def fill_week(source_day, anchor, starts_on: int | None = None,
         copied.append(date)
     return {"source": origin, "copied": copied, "skipped": skipped,
             "entries": len(rows)}
+
+
+def plan_week(anchor, rows: Sequence[Mapping], starts_on: int | None = None,
+              overwrite: bool = False) -> dict:
+    """Write a whole week at once, from one line per meal per day.
+
+    The bulk planner behind the Week page's tables. `rows` carry a `day_offset`
+    (0-6 from the start of the week) and everything a diary line needs; a row
+    with no food and no name is skipped, which is what lets the form be a fixed
+    7x4 grid and the week be however much of it you filled in.
+
+    **Days that already have entries are left alone.** Not refused - filled, and
+    named in the result - because the shape of the job is planning Tuesday to
+    Sunday around a Monday that has already happened, and a button that gave up
+    on the whole week because of Monday would be no use on any day but Sunday
+    night. Nothing here can overwrite: `overwrite` exists for the caller that
+    asks for it explicitly and is off by default.
+    """
+    dates = food.week_days(anchor, starts_on)
+    by_day: dict = {}
+    for raw in rows:
+        try:
+            offset = int(raw.get("day_offset"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= offset < len(dates):
+            continue
+        if not (str(raw.get("name") or "").strip() or raw.get("food_id")):
+            continue
+        by_day.setdefault(dates[offset], []).append(raw)
+
+    written, skipped, added = [], [], []
+    for date in dates:
+        lines = by_day.get(date)
+        if not lines:
+            continue
+        existing = fq.day(date)
+        if existing and existing["entries"] and not overwrite:
+            skipped.append(date)
+            continue
+        # Whatever is on the day already is kept and the new lines appended, so
+        # this fills an empty day and tops up a started one rather than
+        # replacing either.
+        keep = [{**row, "_parsed": True} for row in fq.entries(date)]
+        result = save_day(date, keep + list(lines),
+                          target_name=(existing or {}).get("chosen_target"),
+                          note=(existing or {}).get("note"), source="planner")
+        added += result.get("added", [])
+        written.append({"day": date, "entries": result["entries"],
+                        "added": len(lines)})
+
+    return {"start": dates[0], "end": dates[-1], "days": written,
+            "skipped": skipped, "added": added,
+            "lines": sum(len(lines) for lines in by_day.values())}
 
 
 def load_entries(rows: Sequence[Mapping], replace: bool = False,

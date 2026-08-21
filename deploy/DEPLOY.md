@@ -230,7 +230,8 @@ python deploy/send_food.py --all
 sh /volume1/dashboards/personal_wellness/deploy/run.sh
 ```
 
-It touches **only the four food tables**. The weigh-ins, the runs and every
+It touches **only the five food tables** — the catalogue, the targets, the days,
+their entries, and the Admin settings. The weigh-ins, the runs and every
 workout table are never read from the source and never written. It backs the
 target up first and reads every day's four macro totals back afterwards to prove
 the transfer arrived intact.
